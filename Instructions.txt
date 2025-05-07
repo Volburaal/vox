@@ -1,0 +1,14 @@
+Dependencies
+install java version 11 or higher (go to https://www.oracle.com/java/technologies/downloads/?er=221886)
+
+Place this folder anywhere
+Copy its file path (like C:/Porgram Files/Vox)
+Go to system variables, add a new variable. Name "VOX_HOME", set its value to the file path
+Search for the variable named "PATH", edit it
+Add a new value and paste the filepath there or just paste %VOX_HOME% to reference the previous variable
+
+to parse a file, open a cmd terminal and set the directory to where the target file is present
+run
+vox_parse <filename.vox>, without the angle brackets
+
+running vox parse in powershell terminals will put them in cmd mode
