@@ -34,9 +34,9 @@ grammar Vox;
         }
 
         public void printSymbolTable() {
-            System.out.println("\n===== Symbol Table =====");
+            System.err.println("\n===== Symbol Table =====");
             for (int i = 0; i < scopes.size(); i++) {
-                System.out.println("Scope " + i + ": " + scopes.get(i));
+                System.err.println("Scope " + i + ": " + scopes.get(i));
             }
         }
     }
@@ -96,7 +96,7 @@ variableDeclaration: datatype ID 'equals to' expression {
     String lhsType = $datatype.text;
     String rhsType = $expression.type;
     if (!lhsType.equals(rhsType)) {
-        System.out.println("Implicit cast: " + rhsType + " -> " + lhsType);
+        System.err.println("Implicit cast: " + rhsType + " -> " + lhsType);
     }
 };
 
@@ -107,7 +107,7 @@ assignment: ID 'equals to' expression {
         String lhsType = symbolTable.getType($ID.text);
         String rhsType = $expression.type;
         if (!lhsType.equals(rhsType)) {
-            System.out.println("Implicit cast: " + rhsType + " -> " + lhsType);
+            System.err.println("Implicit cast: " + rhsType + " -> " + lhsType);
         }
     }
 };

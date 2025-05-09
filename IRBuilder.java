@@ -15,12 +15,25 @@ public class IRBuilder extends VoxBaseVisitor<String> {
     }
 
     @Override
+    public String visitMainFunction(VoxParser.MainFunctionContext ctx) {
+        ir.add("define i32 @main() {");
+        
+        for (var stmt : ctx.statement()) {
+            visit(stmt);
+        }
+        
+        ir.add("ret i32 0");
+        ir.add("}");
+        return null;
+    }
+
+
+    @Override
     public String visitVariableDeclaration(VoxParser.VariableDeclarationContext ctx) {
         String varName = ctx.ID().getText();
         String varType = ctx.datatype().getText();
 
         VoxParser.symbolTable.define(varName, varType);
-
         String rhs = visit(ctx.expression());
 
         ir.add("%" + varName + " = alloca " + types(varType));
@@ -28,6 +41,7 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         if (rhs.equals("input")) {
             String fmtLabel = "@.in" + labelCount++;
             String formatStr;
+
             switch (varType) {
                 case "integer": formatStr = "%d"; break;
                 case "float":   formatStr = "%f"; break;
@@ -36,15 +50,25 @@ public class IRBuilder extends VoxBaseVisitor<String> {
                     System.err.println("Unsupported input type: " + varType);
                     formatStr = "%d";
             }
-
             int strLen = formatStr.length() + 1;
             globalStrings.add(fmtLabel + " = constant [" + strLen + " x i8] c\"" + formatStr + "\\00\"");
+
             ir.add("call i32 (i8*, ...) @scanf(i8* getelementptr inbounds ([" + strLen + " x i8], [" + strLen + " x i8]* " + fmtLabel + ", i32 0, i32 0), " + types(varType) + "* %" + varName + ")");
         } else {
-            ir.add("store " + rhs + ", " + types(varType) + "* %" + varName);
+            String[] rightParts = rhs.split(" ", 2);
+            String strippedRight = rightParts.length > 1 ? rightParts[1] : rhs;
+            if (isConstant(strippedRight)) {
+                ir.add("store " + rhs + ", " + types(varType) + "* %" + varName);
+            } else {
+                ir.add("store " + types(varType) + " " + rhs + ", " + types(varType) + "* %" + varName);
+            }
         }
 
         return null;
+    }
+
+    private boolean isConstant(String value) {
+        return value.matches("-?\\d+|\\d*\\.\\d+");
     }
 
 
@@ -53,12 +77,21 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         String varName = ctx.ID().getText();
         String exprVal = visit(ctx.expression());
         String type = VoxParser.symbolTable.getType(varName);
-        ir.add("store " + exprVal + ", " + types(type) + "* %" + varName);
+        String[] rightParts = exprVal.split(" ", 2);
+        String strippedRight = rightParts.length > 1 ? rightParts[1] : exprVal;
+        if (isConstant(exprVal)) {
+            ir.add("store " + exprVal + ", " + types(type) + "* %" + varName);
+        } else {
+            ir.add("store " + types(type) + " " + exprVal + ", " + types(type) + "* %" + varName);
+        }
+
         return null;
     }
 
+
     @Override
     public String visitExpression(VoxParser.ExpressionContext ctx) {
+        
         if (ctx.INT() != null) return "i32 " + ctx.INT().getText();
         if (ctx.FLOAT() != null) return "float " + ctx.FLOAT().getText();
         if (ctx.BOOL() != null) return "i1 " + (ctx.BOOL().getText().equals("true") ? "1" : "0");
@@ -82,30 +115,40 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         if (ctx.operator() != null) {
             String left = visit(ctx.expression(0));
             String right = visit(ctx.expression(1));
-            String tmp = newTemp();
+
+            String[] rightParts = right.split(" ", 2);
+            String strippedRight = rightParts.length > 1 ? rightParts[1] : right;
+
+            boolean isConstant = strippedRight.matches("-?\\d+|\".*\"");
+
+            String finalRight = isConstant ? strippedRight : right; 
+
+            String tmp = newTemp(); 
             String op = ctx.operator().getText();
+
             switch (op) {
                 case "added to":
-                    ir.add(tmp + " = add i32 " + left + ", " + right); break;
+                    ir.add(tmp + " = add i32 " + left + ", " + finalRight); break;
                 case "minus":
-                    ir.add(tmp + " = sub i32 " + left + ", " + right); break;
+                    ir.add(tmp + " = sub i32 " + left + ", " + finalRight); break;
                 case "multiplied by":
-                    ir.add(tmp + " = mul i32 " + left + ", " + right); break;
+                    ir.add(tmp + " = mul i32 " + left + ", " + finalRight); break;
                 case "divided by":
-                    ir.add(tmp + " = sdiv i32 " + left + ", " + right); break;
+                    ir.add(tmp + " = sdiv i32 " + left + ", " + finalRight); break;
                 case "is equal to":
-                    ir.add(tmp + " = icmp eq i32 " + left + ", " + right); break;
+                    ir.add(tmp + " = icmp eq i32 " + left + ", " + finalRight); break;
                 case "is less than":
-                    ir.add(tmp + " = icmp slt i32 " + left + ", " + right); break;
+                    ir.add(tmp + " = icmp slt i32 " + left + ", " + finalRight); break;
                 case "is greater than":
-                    ir.add(tmp + " = icmp sgt i32 " + left + ", " + right); break;
+                    ir.add(tmp + " = icmp sgt i32 " + left + ", " + finalRight); break;
                 case "and":
-                    ir.add(tmp + " = and i1 " + left + ", " + right); break;
+                    ir.add(tmp + " = and i1 " + left + ", " + finalRight); break;
                 case "or":
-                    ir.add(tmp + " = or i1 " + left + ", " + right); break;
+                    ir.add(tmp + " = or i1 " + left + ", " + finalRight); break;
             }
             return tmp;
         }
+
 
         if (ctx.getChild(0).getText().equals("not")) {
             String val = visit(ctx.expression(0));
