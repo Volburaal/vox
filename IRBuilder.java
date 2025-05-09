@@ -19,7 +19,6 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         String varName = ctx.ID().getText();
         String varType = ctx.datatype().getText();
 
-        // Define first so it's available during expression evaluation
         VoxParser.symbolTable.define(varName, varType);
 
         String rhs = visit(ctx.expression());
@@ -40,9 +39,7 @@ public class IRBuilder extends VoxBaseVisitor<String> {
 
             int strLen = formatStr.length() + 1;
             globalStrings.add(fmtLabel + " = constant [" + strLen + " x i8] c\"" + formatStr + "\\00\"");
-
-            ir.add("call i32 (i8*, ...) @scanf(i8* getelementptr inbounds ([" + strLen + " x i8], [" +
-                strLen + " x i8]* " + fmtLabel + ", i32 0, i32 0), " + types(varType) + "* %" + varName + ")");
+            ir.add("call i32 (i8*, ...) @scanf(i8* getelementptr inbounds ([" + strLen + " x i8], [" + strLen + " x i8]* " + fmtLabel + ", i32 0, i32 0), " + types(varType) + "* %" + varName + ")");
         } else {
             ir.add("store " + rhs + ", " + types(varType) + "* %" + varName);
         }
@@ -65,7 +62,14 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         if (ctx.INT() != null) return "i32 " + ctx.INT().getText();
         if (ctx.FLOAT() != null) return "float " + ctx.FLOAT().getText();
         if (ctx.BOOL() != null) return "i1 " + (ctx.BOOL().getText().equals("true") ? "1" : "0");
-        if (ctx.STRING() != null) return ctx.STRING().getText();
+        if (ctx.STRING() != null) {
+            String str = ctx.STRING().getText();
+            str = str.substring(1, str.length() - 1);
+            String strLabel = "@.str" + labelCount++; 
+            int len = str.length() + 1;
+            globalStrings.add(strLabel + " = constant [" + len + " x i8] c\"" + str + "\\00\"");
+            return "i8* " + strLabel;
+        }
 
         if (ctx.ID() != null) {
             String var = ctx.ID().getText();
@@ -125,7 +129,7 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         for (var expr : ctx.printArgs().expression()) {
             if (expr.STRING() != null) {
                 String str = expr.STRING().getText();
-                str = str.substring(1, str.length() - 1); // remove quotes
+                str = str.substring(1, str.length() - 1);
                 fmt.append(str).append(" ");
             } else {
                 String val = visit(expr);
@@ -134,7 +138,7 @@ public class IRBuilder extends VoxBaseVisitor<String> {
             }
         }
 
-        fmt.append("\\0A\\00"); // \n + null terminator
+        fmt.append("\\0A\\00");
         String fmtLabel = "@.fmt" + labelCount++;
         int len = fmt.toString().replaceAll("\\\\", "").length() + 1;
 
@@ -279,6 +283,8 @@ public class IRBuilder extends VoxBaseVisitor<String> {
             case "integer": return "i32";
             case "float": return "float";
             case "boolean": return "i1";
+            case "character": return "i8";
+            case "string": return "i8*";
             default: return "i32";
         }
     }
