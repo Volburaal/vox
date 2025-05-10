@@ -24,4 +24,10 @@ clang %BASENAME%.ll -o %BASENAME%.exe
 
 del /F /Q %GRAMMAR%.g4 %GRAMMAR%*.class %GRAMMAR%*.java %GRAMMAR%*.tokens %GRAMMAR%*.interp antlr-*.log IRBuilder.class IRBuilder.java
 
+echo.
+echo.
+echo The output : 
+
+.\%BASENAME%.exe
+
 endlocal

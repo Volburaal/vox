@@ -1,5 +1,7 @@
 Dependencies
 install java version 11 or higher (go to https://www.oracle.com/java/technologies/downloads/?er=221886)
+download and install llvm, clang is needed. make sure you check that "add to path" option during installation
+
 
 Place this folder anywhere
 Copy its file path (like C:/Porgram Files/Vox)

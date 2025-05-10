@@ -5,8 +5,10 @@ public class IRBuilder extends VoxBaseVisitor<String> {
     int labelCount = 0;
     List<String> ir = new ArrayList<>();
     List<String> globalStrings = new ArrayList<>();
+    Map<String, String> tempTypes = new HashMap<>();
 
-    String newTemp() {
+    String newTemp(String type) {
+        tempTypes.put(("%t" + (tempCount)), type);
         return "%t" + (tempCount++);
     }
 
@@ -91,7 +93,7 @@ public class IRBuilder extends VoxBaseVisitor<String> {
 
     @Override
     public String visitExpression(VoxParser.ExpressionContext ctx) {
-        
+
         if (ctx.INT() != null) return "i32 " + ctx.INT().getText();
         if (ctx.FLOAT() != null) return "float " + ctx.FLOAT().getText();
         if (ctx.BOOL() != null) return "i1 " + (ctx.BOOL().getText().equals("true") ? "1" : "0");
@@ -106,8 +108,8 @@ public class IRBuilder extends VoxBaseVisitor<String> {
 
         if (ctx.ID() != null) {
             String var = ctx.ID().getText();
-            String tmp = newTemp();
             String type = VoxParser.symbolTable.getType(var);
+            String tmp = newTemp(types(type));
             ir.add(tmp + " = load " + types(type) + ", " + types(type) + "* %" + var);
             return tmp;
         }
@@ -116,43 +118,110 @@ public class IRBuilder extends VoxBaseVisitor<String> {
             String left = visit(ctx.expression(0));
             String right = visit(ctx.expression(1));
 
-            String[] rightParts = right.split(" ", 2);
-            String strippedRight = rightParts.length > 1 ? rightParts[1] : right;
+            String leftType = tempTypes.getOrDefault(left, left.split(" ")[0]);
+            String rightType = tempTypes.getOrDefault(right, right.split(" ")[0]);
+            boolean isFloat = "float".equals(leftType) || "float".equals(rightType);
 
-            boolean isConstant = strippedRight.matches("-?\\d+|\".*\"");
+            // Auto-casting: promote i32 to float if necessary
+            if (isFloat) {
+                String[] rightParts = right.split(" ", 2);
+                String[] leftParts = left.split(" ", 2);
 
-            String finalRight = isConstant ? strippedRight : right; 
+                String rightValue = rightParts.length > 1 ? rightParts[1] : right;
+                String leftValue = leftParts.length > 1 ? leftParts[1] : left;
 
-            String tmp = newTemp(); 
-            String op = ctx.operator().getText();
-
-            switch (op) {
-                case "added to":
-                    ir.add(tmp + " = add i32 " + left + ", " + finalRight); break;
-                case "minus":
-                    ir.add(tmp + " = sub i32 " + left + ", " + finalRight); break;
-                case "multiplied by":
-                    ir.add(tmp + " = mul i32 " + left + ", " + finalRight); break;
-                case "divided by":
-                    ir.add(tmp + " = sdiv i32 " + left + ", " + finalRight); break;
-                case "is equal to":
-                    ir.add(tmp + " = icmp eq i32 " + left + ", " + finalRight); break;
-                case "is less than":
-                    ir.add(tmp + " = icmp slt i32 " + left + ", " + finalRight); break;
-                case "is greater than":
-                    ir.add(tmp + " = icmp sgt i32 " + left + ", " + finalRight); break;
-                case "and":
-                    ir.add(tmp + " = and i1 " + left + ", " + finalRight); break;
-                case "or":
-                    ir.add(tmp + " = or i1 " + left + ", " + finalRight); break;
+                boolean rightIsConst = !tempTypes.containsKey(right);
+                boolean leftIsConst = !tempTypes.containsKey(left);
+                
+                String rightOperand = rightIsConst ? rightValue : right;
+                String leftOperand = leftIsConst ? leftValue : left;
+                
+                if ("i32".equals(leftType)) {
+                    String casted = newTemp("float");
+                    ir.add(casted + " = sitofp i32 " + leftOperand + " to float");
+                    left = casted;
+                    leftType = "float";
+                }
+                if ("i32".equals(rightType)) {
+                    String casted = newTemp("float");
+                    ir.add(casted + " = sitofp i32 " + rightOperand + " to float");
+                    right = casted;
+                    rightType = "float";
+                }
             }
-            return tmp;
-        }
 
+            switch (ctx.operator().getText()) {
+                case "added to":
+                case "minus":
+                case "multiplied by":
+                case "divided by": {
+                    String opInstr = switch (ctx.operator().getText()) {
+                        case "added to" -> isFloat ? "fadd" : "add";
+                        case "minus" -> isFloat ? "fsub" : "sub";
+                        case "multiplied by" -> isFloat ? "fmul" : "mul";
+                        case "divided by" -> isFloat ? "fdiv" : "sdiv";
+                        default -> null;
+                    };
+                    String llvmType = isFloat ? "float" : "i32";
+                    String tmp = newTemp(llvmType);
+
+                    String[] rightParts = right.split(" ", 2);
+                    String[] leftParts = left.split(" ", 2);
+
+                    String rightValue = rightParts.length > 1 ? rightParts[1] : right;
+                    String leftValue = leftParts.length > 1 ? leftParts[1] : left;
+
+                    boolean rightIsConst = !tempTypes.containsKey(right);
+                    boolean leftIsConst = !tempTypes.containsKey(left);
+                    
+                    String rightOperand = rightIsConst ? rightValue : right;
+                    String leftOperand = leftIsConst ? leftValue : left;
+
+                    ir.add(tmp + " = " + opInstr + " " + llvmType + " " + leftOperand + ", " + rightOperand);
+                    return tmp;
+                }
+
+                case "is equal to":
+                case "is less than":
+                case "is greater than": {
+                    String cmpOp = switch (ctx.operator().getText()) {
+                        case "is equal to" -> isFloat ? "fcmp oeq" : "icmp eq";
+                        case "is less than" -> isFloat ? "fcmp olt" : "icmp slt";
+                        case "is greater than" -> isFloat ? "fcmp ogt" : "icmp sgt";
+                        default -> "icmp eq";
+                    };
+
+                    String[] rightParts = right.split(" ", 2);
+                    String[] leftParts = left.split(" ", 2);
+
+                    String rightValue = rightParts.length > 1 ? rightParts[1] : right;
+                    String leftValue = leftParts.length > 1 ? leftParts[1] : left;
+
+                    boolean rightIsConst = !tempTypes.containsKey(right);
+                    boolean leftIsConst = !tempTypes.containsKey(left);
+                    
+                    String rightOperand = rightIsConst ? rightValue : right;
+                    String leftOperand = leftIsConst ? leftValue : left;
+
+                    String llvmType = isFloat ? "float" : "i32";
+                    String tmp = newTemp("i1");
+                    ir.add(tmp + " = " + cmpOp + " " + llvmType + " " + leftOperand + ", " + rightOperand);
+                    return tmp;
+                }
+
+                case "and":
+                case "or": {
+                    String logicOp = ctx.operator().getText().equals("and") ? "and" : "or";
+                    String tmp = newTemp("i1");
+                    ir.add(tmp + " = " + logicOp + " i1 " + left + ", " + right);
+                    return tmp;
+                }
+            }
+        }
 
         if (ctx.getChild(0).getText().equals("not")) {
             String val = visit(ctx.expression(0));
-            String tmp = newTemp();
+            String tmp = newTemp("i1");
             ir.add(tmp + " = xor i1 " + val + ", true");
             return tmp;
         }
@@ -163,6 +232,7 @@ public class IRBuilder extends VoxBaseVisitor<String> {
 
         return null;
     }
+
 
     @Override
     public String visitPrintStatement(VoxParser.PrintStatementContext ctx) {
@@ -176,7 +246,16 @@ public class IRBuilder extends VoxBaseVisitor<String> {
                 fmt.append(str).append(" ");
             } else {
                 String val = visit(expr);
-                fmt.append("%d ");
+
+                String type = tempTypes.getOrDefault(val, val.split(" ")[0]);
+
+                switch (type) {
+                    case "i32" -> fmt.append("%d ");
+                    case "float" -> fmt.append("%f ");
+                    case "i1" -> fmt.append("%d ");
+                    default -> fmt.append("%d ");
+                }
+
                 args.add(val);
             }
         }
@@ -184,7 +263,7 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         fmt.append("\\0A\\00");
         String fmtLabel = "@.fmt" + labelCount++;
         int len = fmt.toString().replaceAll("\\\\", "").length() + 1;
-
+        fmt.append("\\00\\00\\00");
         globalStrings.add(fmtLabel + " = constant [" + len + " x i8] c\"" + fmt + "\"");
 
         StringBuilder call = new StringBuilder();
@@ -193,7 +272,9 @@ public class IRBuilder extends VoxBaseVisitor<String> {
             .append(", i32 0, i32 0)");
 
         for (String arg : args) {
-            call.append(", ").append(arg);
+            String type = tempTypes.get(arg);
+            System.err.println(type + " " + arg);
+            call.append(", ").append(type).append(" ").append(arg);
         }
         call.append(")");
 
@@ -203,7 +284,18 @@ public class IRBuilder extends VoxBaseVisitor<String> {
 
     @Override
     public String visitInputExpression(VoxParser.InputExpressionContext ctx) {
-        return "input";
+        String ptr = "%var" + labelCount++;
+        ir.add(ptr + " = alloca i32");
+
+        String gep = "%fmtptr" + labelCount++;
+        ir.add(gep + " = getelementptr inbounds ([3 x i8], [3 x i8]* @.scanFmt, i32 0, i32 0)");
+
+        ir.add("call i32 (i8*, ...) @scanf(i8* " + gep + ", i32* " + ptr + ")");
+
+        String loaded = "%val" + labelCount++;
+        ir.add(loaded + " = load i32, i32* " + ptr);
+
+        return loaded;
     }
 
 
@@ -294,7 +386,7 @@ public class IRBuilder extends VoxBaseVisitor<String> {
                 args.add(visit(expr));
             }
         }
-        String tmp = newTemp();
+        String tmp = newTemp("i32");
         ir.add(tmp + " = call i32 @" + funcName + "(" + String.join(", ", args) + ")");
         return tmp;
     }

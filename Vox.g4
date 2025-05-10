@@ -35,7 +35,7 @@ grammar Vox;
 
         public void printSymbolTable() {
             System.err.println("\n===== Symbol Table =====");
-            for (int i = 0; i < scopes.size(); i++) {
+            for (int i = scopes.size() - 1; i >= 0; i--) {
                 System.err.println("Scope " + i + ": " + scopes.get(i));
             }
         }
@@ -55,6 +55,7 @@ mainFunction: 'integer' 'main' '(' ')' '{'
     }
     statement*
     {
+        symbolTable.printSymbolTable();
         symbolTable.exitScope();
     }
 '}';
@@ -202,17 +203,18 @@ expression returns [String type]
     | 'not' expression { $type = "boolean"; }
     ;
 
-datatype: 'integer' | 'float' | 'boolean' | 'character' | 'string';
 
-operator: 'added to'
-        | 'minus'
-        | 'multiplied by'
+operator: 'multiplied by'
         | 'divided by'
+        | 'added to'
+        | 'minus'
         | 'is equal to'
         | 'is less than'
         | 'is greater than'
         | 'and'
         | 'or';
+
+datatype: 'integer' | 'float' | 'boolean' | 'character' | 'string';
 
 returnType: datatype;
 
