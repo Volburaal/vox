@@ -1,0 +1,21 @@
+name: Build Vox Compiler
+
+on: [push, pull_request]
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up GraalVM
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '21'
+          distribution: 'graalvm'
+          components: native-image
+      - name: Build Native Image
+        run: native-image -jar VoxCompiler.jar vox
+      - uses: actions/upload-artifact@v3
+        with:
+          name: vox-linux
+          path: ./vox
