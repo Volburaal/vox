@@ -45,7 +45,7 @@ grammar Vox;
 }
 
 program: function* mainFunction {
-    symbolTable.printSymbolTable();
+
 };
 
 mainFunction: 'integer' 'main' '(' ')' '{'
@@ -55,7 +55,6 @@ mainFunction: 'integer' 'main' '(' ')' '{'
     }
     statement*
     {
-        symbolTable.printSymbolTable();
         symbolTable.exitScope();
     }
 '}';
