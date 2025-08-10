@@ -209,7 +209,7 @@ public class IRExecutor {
                             sb.append(val);
                         }
                         /*
-                        if (i < toks.length - 1) {
+                        if (i < toks.length - 1) { // this adds space between the print entries, im not a big fan of it in python and js
                             sb.append(" ");
                         }
                         */
@@ -230,14 +230,13 @@ public class IRExecutor {
                     pc++;
                     break;
                 }
-                case "added_to":
-                case "minus":
-                case "multiplied_by":
-                case "divided_by":
-                case "added":
-                case "multiplied":
-                case "divided":
-                case "add": {
+                case "add":
+                case "sub":
+                case "mul":
+                case "div":
+                case "power":
+                case "mod":
+                {
                     if (toks.length < 4) throw new RuntimeException("Malformed op: " + raw);
                     String dest = toks[1], leftTok = toks[2], rightTok = toks[3];
                     Object leftVal = resolveValue(leftTok);
@@ -247,9 +246,13 @@ public class IRExecutor {
                     pc++;
                     break;
                 }
-                case "is_equal_to":
-                case "is_less_than":
-                case "is_greater_than": {
+                case "eq":
+                case "ne":
+                case "gt":
+                case "lt":
+                case "ge":
+                case "le":
+                {
                     if (toks.length < 4) throw new RuntimeException("Malformed cmp: " + raw);
                     String dest = toks[1], leftTok = toks[2], rightTok = toks[3];
                     Object leftVal = resolveValue(leftTok);
@@ -357,34 +360,40 @@ public class IRExecutor {
                 double l = toDouble(leftVal);
                 double r = toDouble(rightVal);
                 switch (op) {
-                    case "added_to":
-                    case "added":
+                    case "power":
+                        double result = 1.0;
+                        if (l == 0 && r == 0) {
+                            result = 1.0; 
+                        } else if (l < 0 && r != (int)r) {
+                            result = Double.NaN; //something imaginary
+                        } else {
+                            result = Math.exp(r * Math.log(l));
+                        }
+                        return result;
+                    case "mul": return l * r;
+                    case "div": return (r == 0) ? 0 : (l / r);
+                    case "mod": return (r == 0) ? l : Math.IEEEremainder(l, r);
                     case "add": return l + r;
-                    case "minus": return l - r;
-                    case "multiplied_by":
-                    case "multiplied":
-                    case "mul":
-                    case "multiply": return l * r;
-                    case "divided_by":
-                    case "divided":
-                    case "div": return l / r;
+                    case "sub": return l - r;
                     default: throw new RuntimeException("Unknown numeric op: " + op);
                 }
             } else {
                 int l = toInt(leftVal);
                 int r = toInt(rightVal);
                 switch (op) {
-                    case "added_to":
-                    case "added":
-                    case "add": return l + r;
-                    case "minus": return l - r;
-                    case "multiplied_by":
-                    case "multiplied":
-                    case "mul":
-                    case "multiply": return l * r;
-                    case "divided_by":
-                    case "divided":
+                    case "power":
+                        int base = l;
+                        int exp = r;
+                        int result = 1;
+                        for (int i = 0; i < exp; i++) {
+                            result *= base;
+                        }
+                        return result;
+                    case "mul": return l * r;
                     case "div": return (r == 0) ? 0 : (l / r);
+                    case "mod": return (r == 0) ? l : (l % r);
+                    case "add": return l + r;
+                    case "sub": return l - r;
                     default: throw new RuntimeException("Unknown numeric op: " + op);
                 }
             }
@@ -392,7 +401,7 @@ public class IRExecutor {
         if (leftVal instanceof String || rightVal instanceof String) {
             String ls = leftVal == null ? "null" : leftVal.toString();
             String rs = rightVal == null ? "null" : rightVal.toString();
-            if (op.startsWith("add") || op.equals("added_to")) return ls + rs;
+            if (op.startsWith("add")) return ls + rs;
             throw new RuntimeException("Non-numeric operands for op " + op + ": " + leftVal + ", " + rightVal);
         }
         throw new RuntimeException("Unsupported operands for arithmetic op " + op + ": " + leftVal + ", " + rightVal);
@@ -400,18 +409,24 @@ public class IRExecutor {
     private static boolean compare(String op, Object leftVal, Object rightVal) {
         if (leftVal == null && rightVal == null) return true;
         if (leftVal == null || rightVal == null) {
-            if ("is_equal_to".equals(op)) return false;
-            if ("is_less_than".equals(op)) return leftVal == null;
-            if ("is_greater_than".equals(op)) return rightVal == null;
+            if ("eq".equals(op)) return false;
+            if ("ne".equals(op)) return false;
+            if ("lt".equals(op)) return leftVal == null;
+            if ("gt".equals(op)) return rightVal == null;
+            if ("le".equals(op)) return leftVal == null;
+            if ("ge".equals(op)) return rightVal == null;
             return false;
         }
         if (isNumber(leftVal) && isNumber(rightVal)) {
             double l = toDouble(leftVal);
             double r = toDouble(rightVal);
             switch (op) {
-                case "is_equal_to": return l == r;
-                case "is_less_than": return l < r;
-                case "is_greater_than": return l > r;
+                case "eq": return l == r;
+                case "ne": return l != r;
+                case "lt": return l < r;
+                case "gt": return l > r;
+                case "le": return l <= r;
+                case "ge": return l >= r;
                 default: throw new RuntimeException("Unknown cmp op: " + op);
             }
         }
@@ -419,27 +434,36 @@ public class IRExecutor {
             String ls = (String) leftVal;
             String rs = (String) rightVal;
             switch (op) {
-                case "is_equal_to": return ls.equals(rs);
-                case "is_less_than": return ls.compareTo(rs) < 0;
-                case "is_greater_than": return ls.compareTo(rs) > 0;
+                case "eq": return ls.equals(rs);
+                case "ne": return !(ls.equals(rs));
+                case "lt": return ls.compareTo(rs) < 0;
+                case "gt": return ls.compareTo(rs) > 0;
+                case "le": return ls.compareTo(rs) <= 0;
+                case "ge": return ls.compareTo(rs) >= 0;
                 default: throw new RuntimeException("Unknown cmp op: " + op);
             }
         }
         if (leftVal instanceof Boolean && rightVal instanceof Boolean) {
             boolean lb = (Boolean)leftVal, rb = (Boolean)rightVal;
             switch (op) {
-                case "is_equal_to": return lb == rb;
-                case "is_less_than": return (!lb && rb);
-                case "is_greater_than": return (lb && !rb);
+                case "eq": return lb == rb;
+                case "ne": return lb != rb;
+                case "lt": return (!lb && rb);
+                case "gt": return (lb && !rb);
+                case "le": return (!lb);
+                case "ge": return (lb);
                 default: throw new RuntimeException("Unknown cmp op: " + op);
             }
         }
         String ls = leftVal.toString();
         String rs = rightVal.toString();
         switch (op) {
-            case "is_equal_to": return ls.equals(rs);
-            case "is_less_than": return ls.compareTo(rs) < 0;
-            case "is_greater_than": return ls.compareTo(rs) > 0;
+            case "eq": return ls.equals(rs);
+            case "ne": return !(ls.equals(rs));
+            case "lt": return ls.compareTo(rs) < 0;
+            case "gt": return ls.compareTo(rs) > 0;
+            case "le": return ls.compareTo(rs) <= 0;
+            case "ge": return ls.compareTo(rs) >= 0;
         }
         return false;
     }

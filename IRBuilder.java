@@ -39,8 +39,32 @@ public class IRBuilder extends VoxBaseVisitor<String> {
     @Override
     public String visitVariableDeclaration(VoxParser.VariableDeclarationContext ctx) {
         String varName = ctx.ID().getText();
-        String value = visit(ctx.expression());
-        instructions.add("set " + varName + " " + value);
+
+        if (ctx.expression() != null) {
+            String value = visit(ctx.expression());
+            instructions.add("set " + varName + " " + value);
+        } else {
+            String dataType = ctx.datatype().getText();
+            String defaultValue;
+            switch (dataType) {
+                case "integer":
+                case "float":
+                case "double":
+                    defaultValue = "0";
+                    break;
+                case "string":
+                    defaultValue = "\"\"";
+                    break;
+                case "boolean":
+                    defaultValue = "false";
+                    break;
+                default:
+                    defaultValue = "null";
+                    break;
+            }
+            instructions.add("set " + varName + " " + defaultValue);
+        }
+
         return null;
     }
 
@@ -65,7 +89,7 @@ public class IRBuilder extends VoxBaseVisitor<String> {
             instructions.add("input " + tmp);
             return tmp;
         }
-        if (ctx.expression().size() == 1 && ctx.getChild(0).getText().equals("not")) {
+        if (ctx.expression().size() == 1 && (ctx.getChild(0).getText().equals("not") || ctx.getChild(0).getText().equals("~") || ctx.getChild(0).getText().equals("!"))) {
             String val = visit(ctx.expression(0));
             String tmp = newTemp();
             instructions.add("not " + tmp + " " + val);
@@ -74,9 +98,74 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         if (ctx.expression().size() == 2) {
             String left = visit(ctx.expression(0));
             String right = visit(ctx.expression(1));
-            String op = ctx.operator().getText().replace(" ", "_");
+            String op = ctx.operator().getText();
+            String operator = "";
+
+            switch(op){
+                case "^":
+                case "to the power of":
+                    operator = "power";
+                    break;
+                case "*":
+                case "multiplied by":
+                    operator = "mul";
+                    break;
+                case "/":
+                case "divided by":
+                    operator = "div";
+                    break;
+                case "%":
+                case "remainder from":
+                    operator = "mod";
+                    break;
+                case "+":
+                case "added to":
+                    operator = "add";
+                    break;
+                case "-":
+                case "minus":
+                    operator = "sub";
+                    break;
+                case "==":
+                case "equals to":
+                    operator = "eq";
+                    break;
+                case "!=":
+                case "not equals to":
+                    operator = "ne";
+                    break;
+                case "<":
+                case "is less than":
+                    operator = "lt";
+                    break;
+                case ">":
+                case "is greater than":
+                    operator = "gt";
+                    break;
+                case "<=":
+                case "=<":
+                case "is less or equal to":
+                    operator = "le";
+                    break;
+                case ">=":
+                case "=>":
+                case "is greater or equal to":
+                    operator = "ge";
+                    break;
+                case "&":
+                case "&&":
+                case "and":
+                    operator = "and";
+                    break;
+                case "|":
+                case "||":
+                case "or":
+                    operator = "or";
+                    break;
+            }
+
             String tmp = newTemp();
-            instructions.add(op + " " + tmp + " " + left + " " + right);
+            instructions.add(operator + " " + tmp + " " + left + " " + right);
             return tmp;
         }
         if (ctx.expression().size() == 1) {
