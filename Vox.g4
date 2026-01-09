@@ -45,10 +45,9 @@ grammar Vox;
 }
 
 program: function* mainFunction {
-
 };
 
-mainFunction: 'integer' 'main' '(' ')' '{'
+mainFunction: 'main' '{'
     {
         symbolTable.enterScope();
         symbolTable.define("main", "function");
@@ -86,6 +85,14 @@ parameter: datatype ID {
     symbolTable.define($ID.text, $datatype.text);
 };
 
+DECLARATION_STARTER: 'consider a'
+    | 'consider an'
+    | 'suppose an'
+    | 'suppose a'
+    | 'let there be an'
+    | 'let there be a'
+    ;
+
 variableDeclaration:
     (datatype ID) {
         if (symbolTable.isDefined($ID.text)) {
@@ -94,7 +101,28 @@ variableDeclaration:
             symbolTable.define($ID.text, $datatype.text);
         }
     }
-    | (datatype ID assign_op=( 'equals to' | '=' | '<-' | '<=' ) expression)
+    (DECLARATION_STARTER datatype ID) {
+        if (symbolTable.isDefined($ID.text)) {
+            System.err.println("Error: Variable " + $ID.text + " already declared.");
+        } else {
+            symbolTable.define($ID.text, $datatype.text);
+        }
+    }
+    | (datatype ID assign_op=( 'equals to' | '=' | '<-' | '<=' | 'which is equal to' | 'which equals' ) expression)
+    {
+        if (symbolTable.isDefined($ID.text)) {
+            System.err.println("Error: Variable " + $ID.text + " already declared.");
+        } else {
+            symbolTable.define($ID.text, $datatype.text);
+        }
+
+        String lhsType = $datatype.text;
+        String rhsType = $expression.type;
+        if (!lhsType.equals(rhsType)) {
+            System.err.println("Implicit cast: " + rhsType + " -> " + lhsType);
+        }
+    }
+    | (DECLARATION_STARTER datatype ID assign_op=( 'equals to' | '=' | '<-' | '<=' | 'which is equal to' | 'which equals' ) expression)
     {
         if (symbolTable.isDefined($ID.text)) {
             System.err.println("Error: Variable " + $ID.text + " already declared.");
@@ -258,6 +286,7 @@ operator: exponent
         | division
         | addition
         | subtraction
+        | subtractionAlt
         | eq
         | ne
         | lt
@@ -273,7 +302,8 @@ multiplication: '*' | 'multiplied by';
 division: '/' | 'divided by';
 addition: '+' | 'added to';
 subtraction: '-' | 'minus';
-mod: '%' | 'remainder from';
+subtractionAlt: ' subtracted from';
+mod: '%' | 'reder from';
 eq: '==' | 'equals to';
 ne: '!=' | 'not equals to';
 lt: '<' | 'is less than';
@@ -284,7 +314,13 @@ and: '&' | '&&' | 'and';
 or: '|' | '||' | 'or';
 not: '~' | '!' | 'not';
 
-datatype: 'integer' | 'float' | 'boolean' | 'character' | 'string';
+datatype: DATATYPE_INT | DATATYPE_FLOAT | DATATYPE_BOOL | DATATYPE_CHARACTER | DATATYPE_STRING;
+
+DATATYPE_INT: 'int' | 'integer' | 'number' | 'whole number';
+DATATYPE_FLOAT: 'float' | 'floating point number';
+DATATYPE_BOOL: 'bool' | 'boolean' | 'boolean number';
+DATATYPE_CHARACTER: 'character' | 'char';
+DATATYPE_STRING: 'string' | 'character string' | 'varchar';
 
 returnType: datatype;
 

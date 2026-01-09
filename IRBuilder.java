@@ -124,6 +124,7 @@ public class IRBuilder extends VoxBaseVisitor<String> {
                     break;
                 case "-":
                 case "minus":
+                case "subtracted from":
                     operator = "sub";
                     break;
                 case "==":
@@ -165,7 +166,12 @@ public class IRBuilder extends VoxBaseVisitor<String> {
             }
 
             String tmp = newTemp();
-            instructions.add(operator + " " + tmp + " " + left + " " + right);
+            if(op === "subtracted from"){
+                instructions.add(operator + " " + tmp + " " + right + " " + left);
+            }
+            else{
+                instructions.add(operator + " " + tmp + " " + left + " " + right);
+            }
             return tmp;
         }
         if (ctx.expression().size() == 1) {
