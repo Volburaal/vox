@@ -45,17 +45,15 @@ grammar Vox;
 }
 
 program: function* mainFunction {
-    symbolTable.printSymbolTable();
 };
 
-mainFunction: 'integer' 'main' '(' ')' '{'
+mainFunction: 'main' '{'
     {
         symbolTable.enterScope();
         symbolTable.define("main", "function");
     }
     statement*
     {
-        symbolTable.printSymbolTable();
         symbolTable.exitScope();
     }
 '}';
@@ -87,31 +85,99 @@ parameter: datatype ID {
     symbolTable.define($ID.text, $datatype.text);
 };
 
-variableDeclaration: datatype ID 'equals to' expression {
-    if (symbolTable.isDefined($ID.text)) {
-        System.err.println("Error: Variable " + $ID.text + " already declared.");
-    } else {
-        symbolTable.define($ID.text, $datatype.text);
-    }
+DECLARATION_STARTER: 'consider a'
+    | 'consider an'
+    | 'suppose an'
+    | 'suppose a'
+    | 'let there be an'
+    | 'let there be a'
+    ;
 
-    String lhsType = $datatype.text;
-    String rhsType = $expression.type;
-    if (!lhsType.equals(rhsType)) {
-        System.err.println("Implicit cast: " + rhsType + " -> " + lhsType);
+variableDeclaration:
+    (datatype ID) {
+        if (symbolTable.isDefined($ID.text)) {
+            System.err.println("Error: Variable " + $ID.text + " already declared.");
+        } else {
+            symbolTable.define($ID.text, $datatype.text);
+        }
     }
-};
+    (DECLARATION_STARTER datatype ID) {
+        if (symbolTable.isDefined($ID.text)) {
+            System.err.println("Error: Variable " + $ID.text + " already declared.");
+        } else {
+            symbolTable.define($ID.text, $datatype.text);
+        }
+    }
+    | (datatype ID assign_op=( 'equals to' | '=' | '<-' | '<=' | 'which is equal to' | 'which equals' ) expression)
+    {
+        if (symbolTable.isDefined($ID.text)) {
+            System.err.println("Error: Variable " + $ID.text + " already declared.");
+        } else {
+            symbolTable.define($ID.text, $datatype.text);
+        }
 
-assignment: ID 'equals to' expression {
-    if (!symbolTable.isDefined($ID.text)) {
-        System.err.println("Error: Variable " + $ID.text + " not declared.");
-    } else {
-        String lhsType = symbolTable.getType($ID.text);
+        String lhsType = $datatype.text;
         String rhsType = $expression.type;
         if (!lhsType.equals(rhsType)) {
             System.err.println("Implicit cast: " + rhsType + " -> " + lhsType);
         }
     }
-};
+    | (DECLARATION_STARTER datatype ID assign_op=( 'equals to' | '=' | '<-' | '<=' | 'which is equal to' | 'which equals' ) expression)
+    {
+        if (symbolTable.isDefined($ID.text)) {
+            System.err.println("Error: Variable " + $ID.text + " already declared.");
+        } else {
+            symbolTable.define($ID.text, $datatype.text);
+        }
+
+        String lhsType = $datatype.text;
+        String rhsType = $expression.type;
+        if (!lhsType.equals(rhsType)) {
+            System.err.println("Implicit cast: " + rhsType + " -> " + lhsType);
+        }
+    }
+    | (expression assign_op=( '=>' | '->' ) datatype ID)
+    {
+        if (symbolTable.isDefined($ID.text)) {
+            System.err.println("Error: Variable " + $ID.text + " already declared.");
+        } else {
+            symbolTable.define($ID.text, $datatype.text);
+        }
+
+        String lhsType = $datatype.text;
+        String rhsType = $expression.type;
+        if (!lhsType.equals(rhsType)) {
+            System.err.println("Implicit cast: " + rhsType + " -> " + lhsType);
+        }
+    }
+;
+
+assignment:
+    (ID assign_op=( 'equals to' | '=' | '<-' | '<=' ) expression)
+    {
+        if (!symbolTable.isDefined($ID.text)) {
+            System.err.println("Error: Variable " + $ID.text + " not declared.");
+        } else {
+            String lhsType = symbolTable.getType($ID.text);
+            String rhsType = $expression.type;
+            if (!lhsType.equals(rhsType)) {
+                System.err.println("Implicit cast: " + rhsType + " -> " + lhsType);
+            }
+        }
+    }
+    | (expression assign_op=( '=>' | '->' ) ID)
+    {
+        if (!symbolTable.isDefined($ID.text)) {
+            System.err.println("Error: Variable " + $ID.text + " not declared.");
+        } else {
+            String lhsType = symbolTable.getType($ID.text);
+            String rhsType = $expression.type;
+            if (!lhsType.equals(rhsType)) {
+                System.err.println("Implicit cast: " + rhsType + " -> " + lhsType);
+            }
+        }
+    }
+;
 
 ifStatement: 'if' '(' expression ')' '{'
     {
@@ -151,7 +217,17 @@ whileLoop: 'while' '(' expression ')' '{'
     }
 '}';
 
-forLoop: 'for' '(' variableDeclaration 'while' expression 'action' assignment ')' '{'
+forConditionDel: 'while'
+            |';'
+            |','
+            |':';
+
+forActionDel: 'action'
+            |';'
+            |','
+            |':';
+
+forLoop: 'for' '(' variableDeclaration forConditionDel expression forActionDel assignment ')' '{'
     {
         symbolTable.enterScope();
     }
@@ -165,7 +241,7 @@ functionCall returns [String type]: ID '(' argumentList? ')' {
     if (!symbolTable.isDefined($ID.text)) {
         System.err.println("Error: Function " + $ID.text + " not declared.");
     }
-    $type = "integer"; // Placeholder: you may define return type tracking later
+    $type = "integer"; // Placeholder: may define return type tracking later
 };
 
 expression returns [String type]
@@ -204,17 +280,47 @@ expression returns [String type]
     ;
 
 
-operator: 'multiplied by'
-        | 'divided by'
-        | 'added to'
-        | 'minus'
-        | 'is equal to'
-        | 'is less than'
-        | 'is greater than'
-        | 'and'
-        | 'or';
+operator: exponent
+        | mod
+        | multiplication
+        | division
+        | addition
+        | subtraction
+        | subtractionAlt
+        | eq
+        | ne
+        | lt
+        | gt
+        | le
+        | ge
+        | and
+        | or
+        | not;
 
-datatype: 'integer' | 'float' | 'boolean' | 'character' | 'string';
+exponent: '^' | 'to the power of'; 
+multiplication: '*' | 'multiplied by';
+division: '/' | 'divided by';
+addition: '+' | 'added to';
+subtraction: '-' | 'minus';
+subtractionAlt: ' subtracted from';
+mod: '%' | 'reder from';
+eq: '==' | 'equals to';
+ne: '!=' | 'not equals to';
+lt: '<' | 'is less than';
+gt: '>' | 'is greater than';
+le: '<=' | '=<' | 'is less or equal to';
+ge: '>=' | '=>' | 'is greater or equal to';
+and: '&' | '&&' | 'and';
+or: '|' | '||' | 'or';
+not: '~' | '!' | 'not';
+
+datatype: DATATYPE_INT | DATATYPE_FLOAT | DATATYPE_BOOL | DATATYPE_CHARACTER | DATATYPE_STRING;
+
+DATATYPE_INT: 'int' | 'integer' | 'number' | 'whole number';
+DATATYPE_FLOAT: 'float' | 'floating point number';
+DATATYPE_BOOL: 'bool' | 'boolean' | 'boolean number';
+DATATYPE_CHARACTER: 'character' | 'char';
+DATATYPE_STRING: 'string' | 'character string' | 'varchar';
 
 returnType: datatype;
 

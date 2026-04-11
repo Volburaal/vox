@@ -1,6 +1,5 @@
 Dependencies
 install java version 11 or higher (go to https://www.oracle.com/java/technologies/downloads/?er=221886)
-download and install llvm, clang is needed. make sure you check that "add to path" option during installation
 
 
 Place this folder anywhere
@@ -11,6 +10,4 @@ Add a new value and paste the filepath there or just paste %VOX_HOME% to referen
 
 to parse a file, open a cmd terminal and set the directory to where the target file is present
 run
-vox_parse <filename.vox>, without the angle brackets
-
-running vox parse in powershell terminals will put them in cmd mode
+vox <filename.vox>, without the angle brackets
