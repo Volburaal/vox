@@ -66,3 +66,60 @@ Open a terminal in the directory containing your `.vox` file and run:
 
 ```bash
 vox <filename.vox>
+```
+
+## Examples
+
+### Example # 1
+```java
+
+integer hailstone(integer n) {
+
+    while (n is greather than 1) {
+        print(n);
+
+        if ((n % 2) == 0) {
+            n = n divided by 2;
+        }
+        else {
+            n = n times 3 + 1;
+        }
+    }
+
+    print(1);
+    return n;
+
+}
+
+main {
+    consider an integer start which is equal to 13;
+    hailstone(start);
+}
+
+```
+
+### Example # 2
+
+```java
+
+integer factorial(integer n) {
+
+    integer result <- 1;
+    integer i <- 2;
+
+    while (i <= n) {
+        result <- result multiplied by i;
+        i <- i + 1;
+    }
+    return result;
+}
+
+main {
+
+    consider an integer value which is equal to 6;
+    integer answer <- factorial(value);
+    print(answer);
+
+}
+
+```
