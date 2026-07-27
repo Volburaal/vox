@@ -108,7 +108,7 @@ variableDeclaration:
             symbolTable.define($ID.text, $datatype.text);
         }
     }
-    | (datatype ID assign_op=( 'equals to' | '=' | '<-' | '<=' | 'which is equal to' | 'which equals' ) expression)
+    | (datatype ID assign_op=( '=' | '<-' | '<=' | 'which is equal to' | 'which equals' ) expression)
     {
         if (symbolTable.isDefined($ID.text)) {
             System.err.println("Error: Variable " + $ID.text + " already declared.");
@@ -122,7 +122,7 @@ variableDeclaration:
             System.err.println("Implicit cast: " + rhsType + " -> " + lhsType);
         }
     }
-    | (DECLARATION_STARTER datatype ID assign_op=( 'equals to' | '=' | '<-' | '<=' | 'which is equal to' | 'which equals' ) expression)
+    | (DECLARATION_STARTER datatype ID assign_op=( '=' | '<-' | '<=' | 'which is equal to' | 'which equals' ) expression)
     {
         if (symbolTable.isDefined($ID.text)) {
             System.err.println("Error: Variable " + $ID.text + " already declared.");
@@ -153,7 +153,7 @@ variableDeclaration:
 ;
 
 assignment:
-    (ID assign_op=( 'equals to' | '=' | '<-' | '<=' ) expression)
+    (ID assign_op=( '=' | '<-' | '<=' ) expression)
     {
         if (!symbolTable.isDefined($ID.text)) {
             System.err.println("Error: Variable " + $ID.text + " not declared.");
@@ -298,14 +298,14 @@ operator: exponent
         | not;
 
 exponent: '^' | 'to the power of'; 
-multiplication: '*' | 'multiplied by';
+multiplication: '*' | 'multiplied by' | 'times';
 division: '/' | 'divided by';
 addition: '+' | 'added to';
 subtraction: '-' | 'minus';
 subtractionAlt: ' subtracted from';
 mod: '%' | 'reder from';
-eq: '==' | 'equals to';
-ne: '!=' | 'not equals to';
+eq: '==' | 'equals to' | 'is';
+ne: '!=' | 'is not';
 lt: '<' | 'is less than';
 gt: '>' | 'is greater than';
 le: '<=' | '=<' | 'is less or equal to';
