@@ -1,7 +1,7 @@
 # Vox Programming Language
 
 **Vox** is a custom programming language built using ANTLR and Java, designed with a focus on natural-language-like syntax and a simplified execution model.
-
+[Read more about it](https://chaotiz.vercel.app/journal/vox)
 ## Features
 
 - Natural language-inspired syntax (e.g., `added to`, `is greater than`)
