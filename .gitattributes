@@ -1,2 +1,9 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Keep platform-native line endings where the tooling cares.
+*.bat text eol=crlf
+*.sh  text eol=lf
+
+# Binary
+*.jar binary
