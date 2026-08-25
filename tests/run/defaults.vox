@@ -1,0 +1,10 @@
+main {
+    integer a;
+    float b;
+    boolean c;
+    string d;
+    print(a);
+    print(b);
+    print(c);
+    print(d);
+}

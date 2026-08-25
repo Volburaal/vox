@@ -1,0 +1,7 @@
+integer f(integer p) { return p + 100; }
+main {
+    integer p <- 7;
+    integer r <- f(1);
+    print(r);
+    print(p);
+}

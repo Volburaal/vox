@@ -1,0 +1,10 @@
+main {
+    integer n <- 4;
+    if (n > 2) { print("a"); print("b"); print("c"); }
+    else { print("z"); }
+
+    if (n < 2) { print("x"); }
+    else { print("y1"); print("y2"); }
+
+    if (n == 4) { print("plain-if"); }
+}

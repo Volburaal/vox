@@ -1,0 +1,4 @@
+main {
+    print(mystery);
+    total <- 5;
+}

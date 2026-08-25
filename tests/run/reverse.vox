@@ -1,0 +1,8 @@
+main {
+    5 -> integer v;
+    print(v);
+    12 -> v;
+    print(v);
+    v multiplied by 2 -> integer w;
+    print(w);
+}

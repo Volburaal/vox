@@ -1,0 +1,4 @@
+integer twice(integer n) { return n * 2; }
+main {
+    print(twice(1, 2));
+}
