@@ -1,0 +1,18 @@
+// Iterative factorial - the second example from the README.
+integer factorial(integer n) {
+
+    integer result <- 1;
+    integer i <- 2;
+
+    while (i <= n) {
+        result <- result multiplied by i;
+        i <- i + 1;
+    }
+    return result;
+}
+
+main {
+    consider an integer value which is equal to 6;
+    integer answer <- factorial(value);
+    print(answer);
+}
