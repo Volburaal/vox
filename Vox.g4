@@ -1,13 +1,6 @@
-/*
- * Vox grammar.
- *
- * This file describes SYNTAX ONLY. It contains no embedded target-language
- * code, which keeps it portable to every ANTLR target (Java, TypeScript, ...).
- * Name resolution and type checking live in SemanticAnalyzer.java.
- */
 grammar Vox;
 
-// ---------------------------------------------------------------- parser ----
+// ---------------------------------------------- parser ----------------------------------------------
 
 program        : function* mainFunction EOF ;
 
@@ -78,7 +71,7 @@ expression
 
 datatype : DATATYPE_INT | DATATYPE_FLOAT | DATATYPE_BOOL | DATATYPE_CHAR | DATATYPE_STRING ;
 
-// ----------------------------------------------------------------- lexer ----
+// ---------------------------------------------- lexer ----------------------------------------------
 
 // Multi-word keywords are spelled with this fragment between words so they
 // tolerate any run of whitespace, including newlines.

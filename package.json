@@ -1,0 +1,10 @@
+{
+  "name": "vox",
+  "private": true,
+  "workspaces": [
+    "core"
+  ],
+  "scripts": {
+    "build": "npm run build -w core"
+  }
+}
