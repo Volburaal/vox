@@ -1,0 +1,19 @@
+{
+  "name": "@vox/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "generate": "java -cp ../tools/antlr-4.13.2-complete.jar org.antlr.v4.Tool -Dlanguage=TypeScript -visitor -no-listener -Xexact-output-dir -o src/gen ../Vox.g4",
+    "build": "npm run generate && tsc"
+  },
+  "dependencies": {
+    "antlr4": "4.13.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.3.0",
+    "typescript": "^5.5.0"
+  }
+}

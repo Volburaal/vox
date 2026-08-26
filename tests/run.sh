@@ -16,11 +16,18 @@ set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
-JAR="build/vox.jar"
-if [ ! -f "$JAR" ]; then
-    echo "tests: $JAR not found - run ./build.sh first" >&2
-    exit 1
+# The engine under test. Defaults to the Java reference implementation; set
+# VOX_CMD to point the same suite at another engine, e.g.
+#   VOX_CMD="node core/dist/cli.js" tests/run.sh
+if [ -z "${VOX_CMD:-}" ]; then
+    JAR="build/vox.jar"
+    if [ ! -f "$JAR" ]; then
+        echo "tests: $JAR not found - run ./build.sh first" >&2
+        exit 1
+    fi
+    VOX_CMD="java -jar $JAR"
 fi
+echo "engine: $VOX_CMD"
 
 pass=0
 fail=0
@@ -41,7 +48,7 @@ for src in tests/run/*.vox; do
     stdin_file="tests/run/$name.in"
     [ -f "$stdin_file" ] || stdin_file="/dev/null"
 
-    actual="$(java -jar "$JAR" "$src" < "$stdin_file" 2>/dev/null | strip_cr)"
+    actual="$($VOX_CMD "$src" < "$stdin_file" 2>/dev/null | strip_cr)"
     status=$?
     expected="$(strip_cr < "$expected_file")"
 
@@ -70,7 +77,7 @@ for src in tests/fail/*.vox; do
     fi
 
     # A tight step limit keeps the infinite-loop test quick.
-    output="$(java -jar "$JAR" "$src" --steps 200000 < /dev/null 2>&1 | strip_cr)"
+    output="$($VOX_CMD "$src" --steps 200000 < /dev/null 2>&1 | strip_cr)"
     status=$?
 
     want_status="$(head -1 "$expect_file" | strip_cr)"
@@ -101,7 +108,7 @@ done
 # ---- the shipped examples must at least run ---------------------------------
 for src in examples/*.vox; do
     name="$(basename "$src" .vox)"
-    if java -jar "$JAR" "$src" < /dev/null >/dev/null 2>&1; then
+    if $VOX_CMD "$src" < /dev/null >/dev/null 2>&1; then
         echo "ok    example:$name"
         pass=$((pass + 1))
     else
