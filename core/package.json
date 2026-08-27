@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "generate": "java -cp ../tools/antlr-4.13.2-complete.jar org.antlr.v4.Tool -Dlanguage=TypeScript -visitor -no-listener -Xexact-output-dir -o src/gen ../Vox.g4",
+    "generate": "node scripts/generate.mjs",
     "build": "npm run generate && tsc"
   },
   "dependencies": {

@@ -1,0 +1,4 @@
+{
+  "installCommand": "(dnf install -y java-17-amazon-corretto-headless || echo 'vercel: could not install Java; the core build will explain the options') && npm install",
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+}

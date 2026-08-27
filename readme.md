@@ -151,6 +151,15 @@ npm run dev            # builds core, then starts the dev server
 npm run build          # builds core, then web/dist (static, deploy anywhere)
 ```
 
+Deploying to Vercel: set the root directory to `web`. `web/vercel.json` does
+the rest: its `installCommand` installs a JDK (ANTLR needs Java to generate the
+parser, and Vercel's build image has none), `web`'s `prebuild` builds `core`
+first, and every route is rewritten to `index.html` for client-side routing.
+
+If Java cannot be installed in your build environment, the alternative is to
+generate the parser locally and commit `core/src/gen` (remove it from
+`.gitignore`); the generate step then skips itself wherever Java is missing.
+
 ## Tests
 
 ```bash
