@@ -2,9 +2,11 @@
   "name": "vox",
   "private": true,
   "workspaces": [
-    "core"
+    "core",
+    "web"
   ],
   "scripts": {
-    "build": "npm run build -w core"
+    "build": "npm run build -w core && npm run build -w web",
+    "dev": "npm run build -w core && npm run dev -w web"
   }
 }

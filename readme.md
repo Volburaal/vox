@@ -43,18 +43,33 @@ The grammar contains **no embedded Java**. It describes syntax only, so the
 same `Vox.g4` can generate a parser for any ANTLR target. All checking lives in
 `SemanticAnalyzer.java`.
 
+Vox has **two engines** built from that one grammar:
+
+- **Java** (`src/`) - the reference implementation and CLI.
+- **TypeScript** (`core/`) - the same pipeline ported for the browser; it
+  powers the web demo. Its parser is generated from `Vox.g4` at build time and
+  is not committed.
+
+Both engines emit identical IR and pass the same regression suite. The one
+deliberate difference: TypeScript integers are **exact** (arbitrary precision),
+while Java ints wrap at 32 bits - so programs that overflow, like
+`factorial(13)`, give the mathematically correct answer in TypeScript and a
+wrapped one in Java.
+
 ## Components
 
 | Path | Purpose |
 | --- | --- |
-| `Vox.g4` | Grammar definition for the Vox language |
-| `src/VoxMain.java` | Entry point (parse -> check -> lower -> run) |
+| `Vox.g4` | Grammar definition for the Vox language (shared by both engines) |
+| `src/VoxMain.java` | Java entry point (parse -> check -> lower -> run) |
 | `src/SemanticAnalyzer.java` | Name resolution and type checking |
 | `src/IRBuilder.java` | Converts the parse tree into IR instructions |
 | `src/IRExecutor.java` | Executes IR instructions on a custom runtime |
-| `build.bat` / `build.sh` | Build script; produces `build/vox.jar` |
+| `core/` | TypeScript engine (`@vox/core`): same pipeline, browser-ready |
+| `core/src/cli.ts` | Node CLI mirroring the Java one, for testing parity |
+| `build.bat` / `build.sh` | Java build; produces `build/vox.jar` |
 | `vox.bat` | CLI launcher |
-| `tests/run.sh` | Regression suite |
+| `tests/run.sh` | Regression suite (drives either engine) |
 | `tools/antlr-4.13.2-complete.jar` | ANTLR dependency |
 
 ## Installation & Setup
@@ -108,14 +123,44 @@ You can also run the jar directly:
 java -jar build/vox.jar examples/factorial.vox
 ```
 
+### TypeScript engine
+
+Requires Node 18+ (and Java, to generate the parser):
+
+```bash
+npm install
+npm run build -w core  # generates the parser from Vox.g4, compiles core/
+node core/dist/cli.js examples/factorial.vox
+```
+
+### Web playground
+
+`web/` is a React + Vite + Tailwind site with three routes: `/` introduces the
+language, `/playground` runs it, and covers the language's purpose and
+its mascot. There is no backend: the TypeScript engine runs in a Web Worker, so
+a runaway program can be stopped without freezing the page, and `input()`
+prompts inline in the console. The editor runs the real compiler as you type
+and underlines syntax and semantic errors; the code, console and IR panes are
+resizable by dragging their dividers.
+
+`docs/portfolio/` holds the journal entry and project card for the author's
+portfolio site, kept in sync with the project.
+
+```bash
+npm run dev            # builds core, then starts the dev server
+npm run build          # builds core, then web/dist (static, deploy anywhere)
+```
+
 ## Tests
 
 ```bash
-./tests/run.sh
+./tests/run.sh                                     # Java engine
+VOX_CMD="node core/dist/cli.js" ./tests/run.sh     # TypeScript engine
 ```
 
-`tests/run/` holds programs with expected output, `tests/fail/` holds programs
-that must be rejected with a given exit code and message.
+`tests/run/` holds programs with expected output (plus optional `.in` stdin),
+`tests/fail/` holds programs that must be rejected with a given exit code and
+message. The same suite drives both engines, which keeps them in lockstep.
 
 ## Examples
 
