@@ -1,0 +1,119 @@
+@import "tailwindcss";
+
+/* Design tokens, taken from the logo: neon strokes on black.
+   Red is the primary stroke, blue the accent. */
+@theme {
+  --color-ink: #050505;
+  --color-panel: #0b0b0e;
+  --color-panel-2: #101014;
+  --color-line: #1e1e26;
+  --color-line-2: #2a2a34;
+
+  --color-neon-red: #ff2b2b;
+  --color-neon-red-soft: #ff6b6b;
+  --color-neon-blue: #3d7bff;
+  --color-neon-blue-soft: #86adff;
+
+  --color-paper: #ececf1;
+  --color-fog: #8b8b96;
+  --color-amber: #ffb454;
+
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:
+    "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-ink);
+  color: var(--color-paper);
+  font-family: var(--font-display);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Faint neon bleed behind the page, like light off a sign onto a wall. */
+.neon-backdrop {
+  background-image:
+    radial-gradient(60% 40% at 20% 0%, rgb(255 43 43 / 0.1), transparent 70%),
+    radial-gradient(50% 35% at 85% 10%, rgb(61 123 255 / 0.1), transparent 70%);
+}
+
+/* Base pieces are @utility so they can be composed with @apply below
+   (Tailwind v4 only lets @apply reference real utilities) and used with
+   variants like hover:glow-red in markup. */
+@utility glow-red {
+  text-shadow:
+    0 0 6px rgb(255 43 43 / 0.9),
+    0 0 22px rgb(255 43 43 / 0.45);
+}
+@utility glow-blue {
+  text-shadow:
+    0 0 6px rgb(61 123 255 / 0.9),
+    0 0 22px rgb(61 123 255 / 0.45);
+}
+
+/* Outlined "tube" boxes: a thin stroke that glows outward and inward. */
+@utility tube-red {
+  border: 1px solid var(--color-neon-red);
+  box-shadow:
+    0 0 10px rgb(255 43 43 / 0.45),
+    inset 0 0 10px rgb(255 43 43 / 0.12);
+}
+@utility tube-blue {
+  border: 1px solid var(--color-neon-blue);
+  box-shadow:
+    0 0 10px rgb(61 123 255 / 0.45),
+    inset 0 0 10px rgb(61 123 255 / 0.12);
+}
+
+@layer components {
+  .btn-red {
+    @apply inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium
+      transition-all duration-150 select-none
+      disabled:opacity-40 disabled:cursor-not-allowed
+      tube-red text-neon-red-soft bg-transparent
+      hover:bg-neon-red/10 hover:text-paper active:scale-[0.98];
+  }
+
+  .btn-blue {
+    @apply inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium
+      transition-all duration-150 select-none
+      disabled:opacity-40 disabled:cursor-not-allowed
+      tube-blue text-neon-blue-soft bg-transparent
+      hover:bg-neon-blue/10 hover:text-paper active:scale-[0.98];
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium
+      transition-all duration-150 select-none
+      disabled:opacity-40 disabled:cursor-not-allowed
+      border border-line-2 text-fog
+      hover:text-paper hover:border-fog;
+  }
+
+  .panel-title {
+    @apply text-[11px] font-semibold uppercase tracking-[0.18em] text-fog;
+  }
+}
+
+/* Thin, dark scrollbars so panels read as one surface. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-2) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-line-2);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}

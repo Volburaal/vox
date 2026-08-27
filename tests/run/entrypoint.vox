@@ -1,0 +1,3 @@
+integer unused(integer q) { return 99; }
+integer alsoUnused() { return 1; }
+main { print("main ran"); }

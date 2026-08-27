@@ -1,0 +1,8 @@
+# Generated parser, compiled classes, and packaged jar (Java build).
+build/
+
+# Node / TypeScript
+node_modules/
+core/src/gen/
+core/dist/
+web/dist/

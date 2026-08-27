@@ -1,0 +1,12 @@
+main {
+    string greeting <- "hello";
+    print(greeting + " " + "world");
+    print("a" + 1);
+    print("tab:\there");
+    print("quote:\"q\"");
+    print("back\\slash");
+    print("newline:\nsecond");
+    print("x", "y", "z");
+    print("equal: ", greeting == "hello");
+    print("less: ", "apple" < "banana");
+}

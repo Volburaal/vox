@@ -1,0 +1,8 @@
+main {
+    integer n <- input();
+    string who <- input();
+    boolean flag <- input();
+    print("n doubled: ", n multiplied by 2);
+    print("hello ", who);
+    print("flag: ", flag);
+}

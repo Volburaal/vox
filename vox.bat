@@ -1,27 +1,22 @@
 @echo off
+REM Vox launcher.
+REM
+REM Unlike the previous version this does NOT regenerate the parser or
+REM recompile on every run, and it never copies sources into your working
+REM directory. Run build.bat once, then put this folder on your PATH.
+
 setlocal
+set "VOX_ROOT=%~dp0"
 
-set GRAMMAR=Vox
-set INPUT_FILE=%1
+if "%~1"=="" (
+    echo Usage: vox ^<file.vox^> [--emit-ir] [--check] [--steps N]
+    exit /b 64
+)
 
-if "%INPUT_FILE%"=="" (
-    echo Usage: vox File.vox
+if not exist "%VOX_ROOT%build\vox.jar" (
+    echo vox: build\vox.jar not found. Run "%VOX_ROOT%build.bat" first. 1>&2
     exit /b 1
 )
 
-for %%f in (%INPUT_FILE%) do set BASENAME=%%~nf
-
-copy %VOX_HOME%\%GRAMMAR%.g4
-copy %VOX_HOME%\%GRAMMAR%Main.java
-copy %VOX_HOME%\IRBuilder.java
-copy %VOX_HOME%\IRExecutor.java
-
-java -classpath %VOX_HOME%\antlr-4.13.2-complete.jar;. org.antlr.v4.Tool -visitor %GRAMMAR%.g4
-
-javac -classpath %VOX_HOME%\antlr-4.13.2-complete.jar;. %GRAMMAR%*.java IRBuilder.java IRExecutor.java %GRAMMAR%Main.java
-
-java -classpath %VOX_HOME%\antlr-4.13.2-complete.jar;. %GRAMMAR%Main %INPUT_FILE%
-
-del /F /Q %GRAMMAR%.g4 %GRAMMAR%*.class %GRAMMAR%*.java %GRAMMAR%*.tokens %GRAMMAR%*.interp antlr-*.log IRBuilder.class IRBuilder.java IRExecutor.class IRExecutor.java
-
-endlocal
+java -jar "%VOX_ROOT%build\vox.jar" %*
+exit /b %ERRORLEVEL%

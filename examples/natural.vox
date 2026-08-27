@@ -1,0 +1,24 @@
+// Showcase of the natural-language syntax.
+main {
+    let there be a whole number score which is equal to 17;
+
+    suppose an integer bonus which equals 3;
+
+    integer total <- score added to bonus;
+    print("total: ", total);
+
+    // Multi-word operators may wrap across lines.
+    if (total is greater
+        than 15) {
+        print("that is a good score");
+    } else {
+        print("keep trying");
+    }
+
+    integer doubled <- total multiplied by 2;
+    integer half <- doubled divided by 4;
+    print("half: ", half);
+
+    integer taken <- 5 subtracted from total;
+    print("after taking 5: ", taken);
+}

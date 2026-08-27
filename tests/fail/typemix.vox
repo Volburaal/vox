@@ -1,0 +1,5 @@
+main {
+    string s <- "hi";
+    integer n <- 3;
+    print(s multiplied by n);
+}

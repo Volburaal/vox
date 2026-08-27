@@ -1,0 +1,5 @@
+main {
+    integer x <- 1;
+    integer x <- 2;
+    print(x);
+}

@@ -1,356 +1,131 @@
 grammar Vox;
 
-@header {
-    import java.util.*;
-}
+// ---------------------------------------------- parser ----------------------------------------------
 
-@members {
-    static class SymbolTable {
-        Stack<Map<String, String>> scopes = new Stack<>();
+program        : function* mainFunction EOF ;
 
-        public SymbolTable() {
-            scopes.push(new HashMap<>());
-        }
+mainFunction   : MAIN block ;
 
-        public void enterScope() { scopes.push(new HashMap<>()); }
-        public void exitScope() { if (!scopes.isEmpty()) scopes.pop(); }
+function       : prototype | definition ;
+prototype      : returnType ID '(' parameterList? ')' ';' ;
+definition     : returnType ID '(' parameterList? ')' block ;
+parameterList  : parameter (',' parameter)* ;
+parameter      : datatype ID ;
+returnType     : datatype ;
 
-        public void define(String name, String type) {
-            scopes.peek().put(name, type);
-        }
+block          : '{' statement* '}' ;
 
-        public boolean isDefined(String name) {
-            for (int i = scopes.size() - 1; i >= 0; i--) {
-                if (scopes.get(i).containsKey(name)) return true;
-            }
-            return false;
-        }
-
-        public String getType(String name) {
-            for (int i = scopes.size() - 1; i >= 0; i--) {
-                if (scopes.get(i).containsKey(name)) return scopes.get(i).get(name);
-            }
-            return null;
-        }
-
-        public void printSymbolTable() {
-            System.err.println("\n===== Symbol Table =====");
-            for (int i = scopes.size() - 1; i >= 0; i--) {
-                System.err.println("Scope " + i + ": " + scopes.get(i));
-            }
-        }
-    }
-
-    static SymbolTable symbolTable = new SymbolTable();
-}
-
-program: function* mainFunction {
-};
-
-mainFunction: 'main' '{'
-    {
-        symbolTable.enterScope();
-        symbolTable.define("main", "function");
-    }
-    statement*
-    {
-        symbolTable.exitScope();
-    }
-'}';
-
-function: prototype | definition;
-
-prototype: returnType ID '(' parameterList? ')' ';' {
-    symbolTable.define($ID.text, "function");
-};
-
-definition: returnType ID '(' parameterList? ')' '{'
-    {
-        if (symbolTable.isDefined($ID.text)) {
-            System.err.println("Error: Function " + $ID.text + " already defined.");
-        } else {
-            symbolTable.define($ID.text, "function");
-        }
-        symbolTable.enterScope();
-    }
-    statement*
-    {
-        symbolTable.exitScope();
-    }
-'}';
-
-parameterList: parameter (',' parameter)*;
-
-parameter: datatype ID {
-    symbolTable.define($ID.text, $datatype.text);
-};
-
-DECLARATION_STARTER: 'consider a'
-    | 'consider an'
-    | 'suppose an'
-    | 'suppose a'
-    | 'let there be an'
-    | 'let there be a'
+statement
+    : variableDeclaration ';'   # declStmt
+    | assignment ';'            # assignStmt
+    | ifStatement               # ifStmt
+    | whileLoop                 # whileStmt
+    | forLoop                   # forStmt
+    | printStatement ';'        # printStmt
+    | returnStatement ';'       # returnStmt
+    | expression ';'            # exprStmt
     ;
 
-variableDeclaration:
-    (datatype ID) {
-        if (symbolTable.isDefined($ID.text)) {
-            System.err.println("Error: Variable " + $ID.text + " already declared.");
-        } else {
-            symbolTable.define($ID.text, $datatype.text);
-        }
-    }
-    (DECLARATION_STARTER datatype ID) {
-        if (symbolTable.isDefined($ID.text)) {
-            System.err.println("Error: Variable " + $ID.text + " already declared.");
-        } else {
-            symbolTable.define($ID.text, $datatype.text);
-        }
-    }
-    | (datatype ID assign_op=( '=' | '<-' | '<=' | 'which is equal to' | 'which equals' ) expression)
-    {
-        if (symbolTable.isDefined($ID.text)) {
-            System.err.println("Error: Variable " + $ID.text + " already declared.");
-        } else {
-            symbolTable.define($ID.text, $datatype.text);
-        }
+// A single rule covers `if` and `if/else`, so the IR builder gets two distinct
+// blocks instead of one flattened statement list.
+ifStatement    : IF '(' expression ')' thenBlock=block (ELSE elseBlock=block)? ;
+whileLoop      : WHILE '(' expression ')' block ;
+forLoop        : FOR '(' variableDeclaration forDel expression forDel assignment ')' block ;
+forDel         : WHILE | ACTION | ';' | ',' | ':' ;
 
-        String lhsType = $datatype.text;
-        String rhsType = $expression.type;
-        if (!lhsType.equals(rhsType)) {
-            System.err.println("Implicit cast: " + rhsType + " -> " + lhsType);
-        }
-    }
-    | (DECLARATION_STARTER datatype ID assign_op=( '=' | '<-' | '<=' | 'which is equal to' | 'which equals' ) expression)
-    {
-        if (symbolTable.isDefined($ID.text)) {
-            System.err.println("Error: Variable " + $ID.text + " already declared.");
-        } else {
-            symbolTable.define($ID.text, $datatype.text);
-        }
-
-        String lhsType = $datatype.text;
-        String rhsType = $expression.type;
-        if (!lhsType.equals(rhsType)) {
-            System.err.println("Implicit cast: " + rhsType + " -> " + lhsType);
-        }
-    }
-    | (expression assign_op=( '=>' | '->' ) datatype ID)
-    {
-        if (symbolTable.isDefined($ID.text)) {
-            System.err.println("Error: Variable " + $ID.text + " already declared.");
-        } else {
-            symbolTable.define($ID.text, $datatype.text);
-        }
-
-        String lhsType = $datatype.text;
-        String rhsType = $expression.type;
-        if (!lhsType.equals(rhsType)) {
-            System.err.println("Implicit cast: " + rhsType + " -> " + lhsType);
-        }
-    }
-;
-
-assignment:
-    (ID assign_op=( '=' | '<-' | '<=' ) expression)
-    {
-        if (!symbolTable.isDefined($ID.text)) {
-            System.err.println("Error: Variable " + $ID.text + " not declared.");
-        } else {
-            String lhsType = symbolTable.getType($ID.text);
-            String rhsType = $expression.type;
-            if (!lhsType.equals(rhsType)) {
-                System.err.println("Implicit cast: " + rhsType + " -> " + lhsType);
-            }
-        }
-    }
-    | (expression assign_op=( '=>' | '->' ) ID)
-    {
-        if (!symbolTable.isDefined($ID.text)) {
-            System.err.println("Error: Variable " + $ID.text + " not declared.");
-        } else {
-            String lhsType = symbolTable.getType($ID.text);
-            String rhsType = $expression.type;
-            if (!lhsType.equals(rhsType)) {
-                System.err.println("Implicit cast: " + rhsType + " -> " + lhsType);
-            }
-        }
-    }
-;
-
-ifStatement: 'if' '(' expression ')' '{'
-    {
-        symbolTable.enterScope();
-    }
-    statement*
-    {
-        symbolTable.exitScope();
-    }
-'}';
-
-ifElse: 'if' '(' expression ')' '{'
-    {
-        symbolTable.enterScope();
-    }
-    statement*
-    {
-        symbolTable.exitScope();
-    }
-'}' 'else' '{'
-    {
-        symbolTable.enterScope();
-    }
-    statement*
-    {
-        symbolTable.exitScope();
-    }
-'}';
-
-whileLoop: 'while' '(' expression ')' '{'
-    {
-        symbolTable.enterScope();
-    }
-    statement*
-    {
-        symbolTable.exitScope();
-    }
-'}';
-
-forConditionDel: 'while'
-            |';'
-            |','
-            |':';
-
-forActionDel: 'action'
-            |';'
-            |','
-            |':';
-
-forLoop: 'for' '(' variableDeclaration forConditionDel expression forActionDel assignment ')' '{'
-    {
-        symbolTable.enterScope();
-    }
-    statement*
-    {
-        symbolTable.exitScope();
-    }
-'}';
-
-functionCall returns [String type]: ID '(' argumentList? ')' {
-    if (!symbolTable.isDefined($ID.text)) {
-        System.err.println("Error: Function " + $ID.text + " not declared.");
-    }
-    $type = "integer"; // Placeholder: may define return type tracking later
-};
-
-expression returns [String type]
-    : ID {
-        if (!symbolTable.isDefined($ID.text)) {
-            System.err.println("Error: Variable " + $ID.text + " not declared.");
-            $type = "error";
-        } else {
-            $type = symbolTable.getType($ID.text);
-        }
-    }
-    | INT { $type = "integer"; }
-    | FLOAT { $type = "float"; }
-    | BOOL { $type = "boolean"; }
-    | STRING { $type = "string"; }
-    | functionCall { $type = $functionCall.type; }
-    | inputExpression { $type = $inputExpression.type; }
-    | '(' expression ')' { $type = $expression.type; }
-    | e1=expression operator e2=expression {
-        if ($e1.type.equals("float") || $e2.type.equals("float")) {
-            $type = "float";
-        } else if ($e1.type.equals("boolean") || $e2.type.equals("boolean")) {
-            $type = "boolean";
-        } else if ($e1.type.equals("string") || $e2.type.equals("string")) {
-            if ($operator.text.equals("added to")) {
-                $type = "string";
-            } else {
-                System.err.println("Error: Invalid operation between strings");
-                $type = "error";
-            }
-        } else {
-            $type = $e1.type;
-        }
-    }
-    | 'not' expression { $type = "boolean"; }
+variableDeclaration
+    : DECL_START? datatype ID (ASSIGN expression)?   # declForward
+    | expression RASSIGN datatype ID                 # declReverse
     ;
 
+assignment
+    : ID ASSIGN expression    # assignForward
+    | expression RASSIGN ID   # assignReverse
+    ;
 
-operator: exponent
-        | mod
-        | multiplication
-        | division
-        | addition
-        | subtraction
-        | subtractionAlt
-        | eq
-        | ne
-        | lt
-        | gt
-        | le
-        | ge
-        | and
-        | or
-        | not;
+printStatement  : PRINT '(' expression (',' expression)* ')' ;
+returnStatement : RETURN expression? ;
+inputExpression : INPUT '(' ')' ;
+functionCall    : ID '(' (expression (',' expression)*)? ')' ;
 
-exponent: '^' | 'to the power of'; 
-multiplication: '*' | 'multiplied by' | 'times';
-division: '/' | 'divided by';
-addition: '+' | 'added to';
-subtraction: '-' | 'minus';
-subtractionAlt: ' subtracted from';
-mod: '%' | 'reder from';
-eq: '==' | 'equals to' | 'is';
-ne: '!=' | 'is not';
-lt: '<' | 'is less than';
-gt: '>' | 'is greater than';
-le: '<=' | '=<' | 'is less or equal to';
-ge: '>=' | '=>' | 'is greater or equal to';
-and: '&' | '&&' | 'and';
-or: '|' | '||' | 'or';
-not: '~' | '!' | 'not';
+// Precedence is the order of these alternatives, highest first.
+expression
+    : '(' expression ')'                          # parenExpr
+    | <assoc=right> expression POW expression     # powExpr
+    | NOT expression                              # notExpr
+    | expression op=(MUL|DIV|MOD) expression      # mulExpr
+    | expression op=(ADD|SUB) expression          # addExpr
+    | expression SUBFROM expression               # subFromExpr
+    | expression op=(LE|GE|LT|GT) expression      # relExpr
+    | expression op=(EQ|NE) expression            # eqExpr
+    | expression AND expression                   # andExpr
+    | expression OR expression                    # orExpr
+    | functionCall                                # callExpr
+    | inputExpression                             # inputExpr
+    | ID                                          # idExpr
+    | INT                                         # intExpr
+    | FLOAT                                       # floatExpr
+    | STRING                                      # stringExpr
+    | BOOL                                        # boolExpr
+    ;
 
-datatype: DATATYPE_INT | DATATYPE_FLOAT | DATATYPE_BOOL | DATATYPE_CHARACTER | DATATYPE_STRING;
+datatype : DATATYPE_INT | DATATYPE_FLOAT | DATATYPE_BOOL | DATATYPE_CHAR | DATATYPE_STRING ;
 
-DATATYPE_INT: 'int' | 'integer' | 'number' | 'whole number';
-DATATYPE_FLOAT: 'float' | 'floating point number';
-DATATYPE_BOOL: 'bool' | 'boolean' | 'boolean number';
-DATATYPE_CHARACTER: 'character' | 'char';
-DATATYPE_STRING: 'string' | 'character string' | 'varchar';
+// ---------------------------------------------- lexer ----------------------------------------------
 
-returnType: datatype;
+// Multi-word keywords are spelled with this fragment between words so they
+// tolerate any run of whitespace, including newlines.
+fragment S : [ \t\r\n]+ ;
 
-statement: variableDeclaration ';'
-        | assignment ';'
-        | expression ';'
-        | ifStatement
-        | ifElse
-        | whileLoop
-        | forLoop
-        | functionCall ';'
-        | returnStatement ';'
-        | printStatement ';'
-        ;
+MAIN   : 'main' ;
+IF     : 'if' ;
+ELSE   : 'else' ;
+WHILE  : 'while' ;
+FOR    : 'for' ;
+ACTION : 'action' ;
+PRINT  : 'print' ;
+INPUT  : 'input' ;
+RETURN : 'return' ;
 
-printStatement: 'print' '(' printArgs ')';
-printArgs: expression (',' expression)*;
+DECL_START
+    : ('consider'|'suppose') S ('an'|'a')
+    | 'let' S 'there' S 'be' S ('an'|'a')
+    ;
 
-inputExpression returns [String type]:
-    'input' '(' ')' {
-        $type = "string";
-    };
+// '<=' and '=>' are comparisons only. They used to double as assignment
+// operators, which made the grammar genuinely ambiguous.
+ASSIGN  : '=' | '<-' | 'which' S 'is' S 'equal' S 'to' | 'which' S 'equals' ;
+RASSIGN : '->' ;
 
-returnStatement: 'return' expression;
+POW     : '^'  | 'to' S 'the' S 'power' S 'of' ;
+MUL     : '*'  | 'multiplied' S 'by' | 'times' ;
+DIV     : '/'  | 'divided' S 'by' ;
+MOD     : '%'  | 'remainder' S 'from' ;
+ADD     : '+'  | 'added' S 'to' ;
+SUB     : '-'  | 'minus' ;
+SUBFROM : 'subtracted' S 'from' ;
+LE      : '<=' | '=<' | 'is' S 'less' S 'or' S 'equal' S 'to' ;
+GE      : '>=' | '=>' | 'is' S 'greater' S 'or' S 'equal' S 'to' ;
+LT      : '<'  | 'is' S 'less' S 'than' ;
+GT      : '>'  | 'is' S 'greater' S 'than' ;
+NE      : '!=' | 'is' S 'not' ;
+EQ      : '==' | 'equals' S 'to' | 'is' ;
+AND     : '&&' | '&' | 'and' ;
+OR      : '||' | '|' | 'or' ;
+NOT     : '~'  | '!' | 'not' ;
 
-argumentList: expression (',' expression)*;
+DATATYPE_INT    : 'int' | 'integer' | 'number' | 'whole' S 'number' ;
+DATATYPE_FLOAT  : 'float' | 'floating' S 'point' S 'number' ;
+DATATYPE_BOOL   : 'bool' | 'boolean' S 'number' | 'boolean' ;
+DATATYPE_CHAR   : 'character' | 'char' ;
+DATATYPE_STRING : 'string' | 'character' S 'string' | 'varchar' ;
 
-STRING : '"' (~["\\] | '\\' .)* '"' ;
-INT: [0-9]+;
-FLOAT: [0-9]+'.'[0-9]+;
-BOOL: 'true' | 'false';
-ID: [a-zA-Z_][a-zA-Z_0-9]*;
-WS: [ \t\n\r]+ -> skip;
+BOOL   : 'true' | 'false' ;
+FLOAT  : [0-9]+ '.' [0-9]+ ;
+INT    : [0-9]+ ;
+STRING : '"' (~["\\\r\n] | '\\' .)* '"' ;
+ID     : [a-zA-Z_][a-zA-Z_0-9]* ;
+
+LINE_COMMENT  : '//' ~[\r\n]* -> skip ;
+BLOCK_COMMENT : '/*' .*? '*/' -> skip ;
+WS            : [ \t\r\n]+ -> skip ;

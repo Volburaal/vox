@@ -1,0 +1,13 @@
+// Recursive fibonacci - exercises call frames and parameter binding.
+integer fib(integer n) {
+    if (n is less than 2) {
+        return n;
+    }
+    return fib(n minus 1) + fib(n minus 2);
+}
+
+main {
+    for (integer i <- 0; i is less than 10; i <- i + 1) {
+        print(fib(i), " ");
+    }
+}
