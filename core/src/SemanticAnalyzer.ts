@@ -1,4 +1,4 @@
-import { ParserRuleContext, Token } from 'antlr4';
+import { ParserRuleContext } from 'antlr4';
 import VoxVisitor from './gen/VoxVisitor.js';
 import {
     ProgramContext, PrototypeContext, DefinitionContext, MainFunctionContext,
@@ -12,6 +12,7 @@ import {
     FunctionCallContext, PrintStatementContext, ReturnStatementContext,
 } from './gen/VoxParser.js';
 import VoxParser from './gen/VoxParser.js';
+import { Diagnostic, diagnosticFor, formatDiagnostic } from './diagnostics.js';
 
 /** A declared function: return type plus the types of its parameters. */
 interface Signature {
@@ -28,15 +29,25 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     private readonly functions = new Map<string, Signature>();
     /** Innermost scope is the LAST element. */
     private readonly scopes: Map<string, string>[] = [];
-    readonly errors: string[] = [];
-    readonly warnings: string[] = [];
+    /** Every message with its source range, in the order it was found. */
+    readonly diagnostics: Diagnostic[] = [];
+
+    /** The CLI-style "line L:C error: ..." strings, errors only. */
+    get errors(): string[] {
+        return this.diagnostics.filter(d => d.severity === 'error').map(formatDiagnostic);
+    }
+
+    /** The CLI-style "line L:C warning: ..." strings, warnings only. */
+    get warnings(): string[] {
+        return this.diagnostics.filter(d => d.severity === 'warning').map(formatDiagnostic);
+    }
 
     private error(ctx: ParserRuleContext, msg: string): void {
-        this.errors.push(at(ctx.start) + ' error: ' + msg);
+        this.diagnostics.push(diagnosticFor(ctx, 'error', msg));
     }
 
     private warn(ctx: ParserRuleContext, msg: string): void {
-        this.warnings.push(at(ctx.start) + ' warning: ' + msg);
+        this.diagnostics.push(diagnosticFor(ctx, 'warning', msg));
     }
 
     // ------------------------------------------------------------- scopes --
@@ -375,10 +386,6 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         if (ctx.expression()) this.visit(ctx.expression());
         return null;
     };
-}
-
-function at(t: Token): string {
-    return `line ${t.line}:${t.column}`;
 }
 
 function isNumeric(t: string): boolean {
