@@ -45,7 +45,7 @@ assignment
 
 printStatement  : PRINT '(' expression (',' expression)* ')' ;
 returnStatement : RETURN expression? ;
-inputExpression : INPUT '(' ')' ;
+inputExpression : INPUT_CALL '(' ')' | INPUT ;
 functionCall    : ID '(' (expression (',' expression)*)? ')' ;
 
 // Precedence is the order of these alternatives, highest first.
@@ -84,7 +84,8 @@ WHILE  : 'while' ;
 FOR    : 'for' ;
 ACTION : 'action' ;
 PRINT  : 'print' ;
-INPUT  : 'input' ;
+INPUT_CALL  : 'input' ;
+INPUT: 'an input' | 'some user input' | 'a user input';
 RETURN : 'return' ;
 
 DECL_START
@@ -101,7 +102,7 @@ POW     : '^'  | 'to' S 'the' S 'power' S 'of' ;
 MUL     : '*'  | 'multiplied' S 'by' | 'times' ;
 DIV     : '/'  | 'divided' S 'by' ;
 MOD     : '%'  | 'remainder' S 'from' ;
-ADD     : '+'  | 'added' S 'to' ;
+ADD     : '+'  | 'added' S 'to' | 'plus' ;
 SUB     : '-'  | 'minus' ;
 SUBFROM : 'subtracted' S 'from' ;
 LE      : '<=' | '=<' | 'is' S 'less' S 'or' S 'equal' S 'to' ;
