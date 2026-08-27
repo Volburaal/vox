@@ -4,11 +4,11 @@ integer hailstone(integer n) {
     while (n is greater than 1) {
         print(n);
 
-        if ((n % 2) == 0) {
-            n = n divided by 2;
+        if (n remainder from 2 is 0) {
+            n divided by 2 -> n;
         }
         else {
-            n = n times 3 + 1;
+            n <- n times 3 plus 1;
         }
     }
 
@@ -17,6 +17,6 @@ integer hailstone(integer n) {
 }
 
 main {
-    consider an integer start which is equal to 13;
+    consider an integer start which is equal to some user input;
     hailstone(start);
 }

@@ -7,7 +7,7 @@ integer fib(integer n) {
 }
 
 main {
-    for (integer i <- 0; i is less than 10; i <- i + 1) {
+    for (integer i <- 0 while i is less than 10 after iteration i + 1 -> i) {
         print(fib(i), " ");
     }
 }

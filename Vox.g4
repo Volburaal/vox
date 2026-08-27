@@ -82,7 +82,7 @@ IF     : 'if' ;
 ELSE   : 'else' ;
 WHILE  : 'while' ;
 FOR    : 'for' ;
-ACTION : 'action' ;
+ACTION : 'action' | 'after iteration' ;
 PRINT  : 'print' ;
 INPUT_CALL  : 'input' ;
 INPUT: 'an input' | 'some user input' | 'a user input';
