@@ -6,7 +6,7 @@
     "web"
   ],
   "scripts": {
-    "build": "npm run build -w core && npm run build -w web",
+    "build": "npm run build -w web",
     "dev": "npm run build -w core && npm run dev -w web"
   }
 }

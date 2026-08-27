@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "cd ../core && npm run build",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
   },
