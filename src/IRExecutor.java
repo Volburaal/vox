@@ -12,10 +12,12 @@ import java.util.*;
  *   set <var> <operand>
  *   input <dest>
  *   print <operand>...
- *   not <dest> <operand>
+ *   not|neg <dest> <operand>
  *   add|sub|mul|div|mod|power <dest> <left> <right>
  *   eq|ne|lt|gt|le|ge <dest> <left> <right>
  *   and|or <dest> <left> <right>
+ *   cast <dest> <operand> <type>
+ *   builtin <dest> <name> [operand...]
  *   if_false <cond> goto <label>
  *   goto <label>
  *   label <label>
@@ -171,6 +173,13 @@ public class IRExecutor {
                     break;
                 }
 
+                case "neg": {
+                    require(toks, 3, raw);
+                    frame().locals.put(toks[1], negate(resolve(toks[2])));
+                    pc++;
+                    break;
+                }
+
                 case "add": case "sub": case "mul":
                 case "div": case "mod": case "power": {
                     require(toks, 4, raw);
@@ -192,6 +201,22 @@ public class IRExecutor {
                     boolean l = truthy(resolve(toks[2]));
                     boolean r = truthy(resolve(toks[3]));
                     frame().locals.put(toks[1], "and".equals(toks[0]) ? (l && r) : (l || r));
+                    pc++;
+                    break;
+                }
+
+                case "cast": {
+                    require(toks, 4, raw);
+                    frame().locals.put(toks[1], cast(resolve(toks[2]), toks[3]));
+                    pc++;
+                    break;
+                }
+
+                case "builtin": {
+                    require(toks, 3, raw);
+                    List<Object> args = new ArrayList<>();
+                    for (int i = 3; i < toks.length; i++) args.add(resolve(toks[i]));
+                    frame().locals.put(toks[1], builtin(toks[2], args));
                     pc++;
                     break;
                 }
@@ -357,6 +382,12 @@ public class IRExecutor {
     private static boolean isNumber(Object o) { return o instanceof Integer || o instanceof Double; }
     private static double toDouble(Object o)  { return ((Number) o).doubleValue(); }
 
+    private static Object negate(Object v) {
+        if (v instanceof Integer) return -((Integer) v);
+        if (v instanceof Double)  return -((Double) v);
+        throw new VoxRuntimeError("operator '-' needs a number but got " + describe(v));
+    }
+
     private static Object arithmetic(String op, Object left, Object right) {
         // '+' doubles as string concatenation.
         if ("add".equals(op) && (left instanceof String || right instanceof String)) {
@@ -438,6 +469,101 @@ public class IRExecutor {
             case "ge": return c >= 0;
             default: throw new VoxRuntimeError("unknown comparison op: " + op);
         }
+    }
+
+    /** Explicit conversion, `x as integer`. Fails loudly instead of guessing. */
+    private static Object cast(Object v, String type) {
+        switch (type) {
+            case "integer":
+                if (v instanceof Integer) return v;
+                if (v instanceof Double) {
+                    double d = (Double) v;
+                    if (Double.isNaN(d) || Double.isInfinite(d)) break;
+                    return (int) d;
+                }
+                if (v instanceof Boolean) return (Boolean) v ? 1 : 0;
+                if (v instanceof String && ((String) v).trim().matches("-?\\d+")) {
+                    try { return Integer.valueOf(((String) v).trim()); } catch (NumberFormatException ignored) { }
+                }
+                break;
+            case "float":
+                if (v instanceof Double) return v;
+                if (v instanceof Integer) return ((Integer) v).doubleValue();
+                if (v instanceof Boolean) return (Boolean) v ? 1.0 : 0.0;
+                if (v instanceof String && ((String) v).trim().matches("-?(\\d+|\\d*\\.\\d+)")) {
+                    return Double.valueOf(((String) v).trim());
+                }
+                break;
+            case "boolean":
+                if (v instanceof Boolean) return v;
+                if (v instanceof Integer) return (Integer) v != 0;
+                if (v instanceof Double) return (Double) v != 0.0;
+                if (v instanceof String) {
+                    String t = ((String) v).trim().toLowerCase(Locale.ROOT);
+                    if (t.equals("true")) return Boolean.TRUE;
+                    if (t.equals("false")) return Boolean.FALSE;
+                }
+                break;
+            case "string":
+            case "character":
+                if (v == null) break;
+                return display(v);
+            default:
+                throw new VoxRuntimeError("unknown type in cast: " + type);
+        }
+        throw new VoxRuntimeError("cannot convert " + describe(v) + " to " + type);
+    }
+
+    /** The builtin functions. Spoken forms map onto the same names. */
+    private static Object builtin(String name, List<Object> args) {
+        switch (name) {
+            case "sqrt": {
+                arity(name, args, 1);
+                double x = toDouble(num(name, args.get(0)));
+                if (x < 0) throw new VoxRuntimeError("square root of a negative number: " + display(args.get(0)));
+                return Math.sqrt(x);
+            }
+            case "abs": {
+                arity(name, args, 1);
+                Object x = num(name, args.get(0));
+                return x instanceof Integer ? (Object) Math.abs((Integer) x) : (Object) Math.abs((Double) x);
+            }
+            case "round":   arity(name, args, 1); return (int) Math.round(toDouble(num(name, args.get(0))));
+            case "floor":   arity(name, args, 1); return (int) Math.floor(toDouble(num(name, args.get(0))));
+            case "ceiling": arity(name, args, 1); return (int) Math.ceil(toDouble(num(name, args.get(0))));
+            case "min":
+            case "max": {
+                arity(name, args, 2);
+                Object a = num(name, args.get(0)), b = num(name, args.get(1));
+                boolean pickMin = "min".equals(name);
+                if (a instanceof Integer && b instanceof Integer) {
+                    return pickMin ? Math.min((Integer) a, (Integer) b) : Math.max((Integer) a, (Integer) b);
+                }
+                return pickMin ? Math.min(toDouble(a), toDouble(b)) : Math.max(toDouble(a), toDouble(b));
+            }
+            case "length":    arity(name, args, 1); return str(name, args.get(0)).length();
+            case "uppercase": arity(name, args, 1); return str(name, args.get(0)).toUpperCase(Locale.ROOT);
+            case "lowercase": arity(name, args, 1); return str(name, args.get(0)).toLowerCase(Locale.ROOT);
+            default:
+                throw new VoxRuntimeError("unknown builtin: " + name);
+        }
+    }
+
+    private static void arity(String name, List<Object> args, int n) {
+        if (args.size() != n) {
+            throw new VoxRuntimeError("builtin '" + name + "' expects " + n
+                    + " argument(s) but got " + args.size());
+        }
+    }
+
+    private static Object num(String name, Object v) {
+        if (!isNumber(v)) throw new VoxRuntimeError("'" + name + "' needs a number but got " + describe(v));
+        return v;
+    }
+
+    private static String str(String name, Object v) {
+        if (!(v instanceof String)) throw new VoxRuntimeError("'" + name + "' needs a string but got " + describe(v));
+        return (String) v;
     }
 
     private static String describe(Object o) {

@@ -2,9 +2,11 @@ import { ParserRuleContext } from 'antlr4';
 import VoxVisitor from './gen/VoxVisitor.js';
 import {
     ProgramContext, PrototypeContext, DefinitionContext, MainFunctionContext,
-    BlockContext, ParameterListContext, DeclForwardContext, DeclReverseContext,
-    AssignForwardContext, AssignReverseContext, IfStatementContext,
-    WhileLoopContext, ForLoopContext, ExpressionContext, ParenExprContext,
+    BlockContext, ParameterListContext, ReturnTypeContext, DeclForwardContext,
+    DeclReverseContext, AssignForwardContext, AssignReverseContext,
+    IfStatementContext, WhileLoopContext, ForLoopContext, BreakStmtContext,
+    ContinueStmtContext, ExprStmtContext, ExpressionContext, ParenExprContext,
+    CastExprContext, BuiltinExprContext, BuiltinNameContext, NegExprContext,
     NotExprContext, PowExprContext, MulExprContext, AddExprContext,
     SubFromExprContext, RelExprContext, EqExprContext, AndExprContext,
     OrExprContext, IdExprContext, IntExprContext, FloatExprContext,
@@ -20,6 +22,42 @@ interface Signature {
     paramTypes: string[];
 }
 
+/** What a builtin accepts ('num' or 'string' per parameter) and returns. */
+interface BuiltinSpec {
+    params: ('num' | 'string')[];
+    /** A fixed type, or 'numeric' to follow the arguments (float if any float). */
+    result: string;
+}
+
+/**
+ * The builtin functions, by their symbolic name. The spoken forms in the
+ * grammar ("square root of") map onto the same names. User-defined functions
+ * take precedence over these, so no name is reserved.
+ */
+export const BUILTINS: ReadonlyMap<string, BuiltinSpec> = new Map<string, BuiltinSpec>([
+    ['sqrt',      { params: ['num'],        result: 'float' }],
+    ['abs',       { params: ['num'],        result: 'numeric' }],
+    ['round',     { params: ['num'],        result: 'integer' }],
+    ['floor',     { params: ['num'],        result: 'integer' }],
+    ['ceiling',   { params: ['num'],        result: 'integer' }],
+    ['min',       { params: ['num', 'num'], result: 'numeric' }],
+    ['max',       { params: ['num', 'num'], result: 'numeric' }],
+    ['length',    { params: ['string'],     result: 'integer' }],
+    ['uppercase', { params: ['string'],     result: 'string' }],
+    ['lowercase', { params: ['string'],     result: 'string' }],
+]);
+
+/** Maps a spoken builtin token onto its symbolic name. */
+export function builtinNameOf(ctx: BuiltinNameContext): string {
+    if (ctx.SQRT_OF()) return 'sqrt';
+    if (ctx.ABS_OF()) return 'abs';
+    if (ctx.LENGTH_OF()) return 'length';
+    if (ctx.FLOOR_OF()) return 'floor';
+    if (ctx.CEIL_OF()) return 'ceiling';
+    if (ctx.UPPER_OF()) return 'uppercase';
+    return 'lowercase';
+}
+
 /**
  * Name resolution and type checking. A direct port of the Java
  * SemanticAnalyzer; diagnostic messages are kept byte-for-byte identical so
@@ -29,6 +67,9 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     private readonly functions = new Map<string, Signature>();
     /** Innermost scope is the LAST element. */
     private readonly scopes: Map<string, string>[] = [];
+    /** The function being checked; null inside main. */
+    private currentFunction: { name: string; returnType: string } | null = null;
+    private loopDepth = 0;
     /** Every message with its source range, in the order it was found. */
     readonly diagnostics: Diagnostic[] = [];
 
@@ -85,11 +126,11 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
             const p = f.prototype();
             const d = f.definition();
             if (p) {
-                this.declareFunction(p.ID().getText(),
-                    canonical(p.returnType().getText()), paramTypes(p.parameterList()), p);
+                this.declareFunction(p.ID().getText(), returnTypeOf(p.returnType()),
+                    paramTypes(p.parameterList()), p);
             } else if (d) {
-                this.declareFunction(d.ID().getText(),
-                    canonical(d.returnType().getText()), paramTypes(d.parameterList()), d);
+                this.declareFunction(d.ID().getText(), returnTypeOf(d.returnType()),
+                    paramTypes(d.parameterList()), d);
             }
         }
 
@@ -119,21 +160,24 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     };
 
     visitDefinition = (ctx: DefinitionContext): null => {
+        const name = ctx.ID().getText();
+        this.currentFunction = { name, returnType: returnTypeOf(ctx.returnType()) };
         this.enterScope();
         const params = ctx.parameterList();
         if (params) {
             for (const p of params.parameter_list()) {
-                const name = p.ID().getText();
-                if (this.declaredHere(name)) {
-                    this.error(p, `duplicate parameter '${name}'`);
+                const pname = p.ID().getText();
+                if (this.declaredHere(pname)) {
+                    this.error(p, `duplicate parameter '${pname}'`);
                 } else {
-                    this.define(name, canonical(p.datatype().getText()));
+                    this.define(pname, canonical(p.datatype().getText()));
                 }
             }
         }
         // The body's own scope, so a local may shadow a parameter.
         this.visit(ctx.block());
         this.exitScope();
+        this.currentFunction = null;
         return null;
     };
 
@@ -224,13 +268,16 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     visitIfStatement = (ctx: IfStatementContext): null => {
         this.requireCondition(ctx.expression());
         this.visit(ctx._thenBlock);
-        if (ctx._elseBlock) this.visit(ctx._elseBlock);
+        if (ctx._elseIf) this.visit(ctx._elseIf);
+        else if (ctx._elseBlock) this.visit(ctx._elseBlock);
         return null;
     };
 
     visitWhileLoop = (ctx: WhileLoopContext): null => {
         this.requireCondition(ctx.expression());
+        this.loopDepth++;
         this.visit(ctx.block());
+        this.loopDepth--;
         return null;
     };
 
@@ -240,8 +287,29 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         this.visit(ctx.variableDeclaration());
         this.requireCondition(ctx.expression());
         this.visit(ctx.assignment());
+        this.loopDepth++;
         this.visit(ctx.block());
+        this.loopDepth--;
         this.exitScope();
+        return null;
+    };
+
+    visitBreakStmt = (ctx: BreakStmtContext): null => {
+        if (this.loopDepth === 0) {
+            this.error(ctx, `'${ctx.BREAK().getText()}' can only be used inside a loop`);
+        }
+        return null;
+    };
+
+    visitContinueStmt = (ctx: ContinueStmtContext): null => {
+        if (this.loopDepth === 0) {
+            this.error(ctx, `'${ctx.CONTINUE().getText()}' can only be used inside a loop`);
+        }
+        return null;
+    };
+
+    visitExprStmt = (ctx: ExprStmtContext): null => {
+        this.visit(ctx.expression());
         return null;
     };
 
@@ -255,6 +323,25 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     // -------------------------------------------------------- expressions --
 
     visitParenExpr = (ctx: ParenExprContext): string | null => this.visit(ctx.expression());
+
+    visitCastExpr = (ctx: CastExprContext): string => {
+        const source = this.visit(ctx.expression());
+        const target = canonical(ctx.datatype().getText());
+        return source === 'error' ? 'error' : target;
+    };
+
+    visitBuiltinExpr = (ctx: BuiltinExprContext): string => {
+        const name = builtinNameOf(ctx.builtinName());
+        return this.checkBuiltin(ctx, name, [this.visit(ctx.expression())]);
+    };
+
+    visitNegExpr = (ctx: NegExprContext): string => {
+        const t = this.visit(ctx.expression());
+        if (t === 'error') return 'error';
+        if (t === 'any' || (t !== null && isNumeric(t))) return t;
+        this.error(ctx, `operator '-' cannot be applied to ${t}`);
+        return 'error';
+    };
 
     visitNotExpr = (ctx: NotExprContext): string => {
         this.visit(ctx.expression());
@@ -344,8 +431,16 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     // fixed type would make every realistic use of it a type error.
     visitInputExpr = (_ctx: InputExprContext): string => 'any';
 
-    visitCallExpr = (ctx: CallExprContext): string | null =>
-        this.visit(ctx.functionCall());
+    visitCallExpr = (ctx: CallExprContext): string | null => {
+        const call = ctx.functionCall();
+        const t = this.visit(call);
+        // A procedure call is fine as a statement on its own, but has no value.
+        if (t === 'void' && !(ctx.parentCtx instanceof ExprStmtContext)) {
+            this.error(ctx, `procedure '${call.ID().getText()}' returns nothing and cannot be used as a value`);
+            return 'error';
+        }
+        return t;
+    };
 
     visitFunctionCall = (ctx: FunctionCallContext): string => {
         const name = ctx.ID().getText();
@@ -353,6 +448,7 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
 
         const sig = this.functions.get(name);
         if (!sig) {
+            if (BUILTINS.has(name)) return this.checkBuiltin(ctx, name, argTypes);
             this.error(ctx, `function '${name}' is not declared`);
             return 'error';
         }
@@ -377,13 +473,63 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         return sig.returnType;
     };
 
+    /** Arity and type checks for a builtin; returns its result type. */
+    private checkBuiltin(ctx: ParserRuleContext, name: string,
+                         argTypes: (string | null)[]): string {
+        const spec = BUILTINS.get(name)!;
+        const result = (): string => {
+            if (spec.result !== 'numeric') return spec.result;
+            if (argTypes.some(t => t === 'float')) return 'float';
+            if (argTypes.some(t => t === 'any')) return 'any';
+            return 'integer';
+        };
+        if (spec.params.length !== argTypes.length) {
+            this.error(ctx, `function '${name}' expects ${spec.params.length}`
+                + ` argument(s) but got ${argTypes.length}`);
+            return result();
+        }
+        for (let i = 0; i < argTypes.length; i++) {
+            const got = argTypes[i];
+            if (got === null || got === 'error' || got === 'any') continue;
+            const kind = spec.params[i];
+            const ok = kind === 'num' ? isNumeric(got) : (got === 'string' || got === 'character');
+            if (!ok) {
+                this.error(ctx, `argument ${i + 1} of '${name}' expects `
+                    + (kind === 'num' ? 'a number' : 'string') + ` but got ${got}`);
+            }
+        }
+        return result();
+    }
+
     visitPrintStatement = (ctx: PrintStatementContext): null => {
         for (const e of ctx.expression_list()) this.visit(e);
         return null;
     };
 
     visitReturnStatement = (ctx: ReturnStatementContext): null => {
-        if (ctx.expression()) this.visit(ctx.expression());
+        const valueType = ctx.expression() ? this.visit(ctx.expression()) : null;
+        const fn = this.currentFunction;
+        if (fn === null) return null; // `return` in main just ends the program
+
+        if (fn.returnType === 'void') {
+            if (ctx.expression()) {
+                this.error(ctx, `procedure '${fn.name}' cannot return a value`);
+            }
+            return null;
+        }
+        if (!ctx.expression()) {
+            this.error(ctx, `function '${fn.name}' must return a value of type ${fn.returnType}`);
+            return null;
+        }
+        if (valueType === null || valueType === 'error' || valueType === 'any'
+            || valueType === fn.returnType) return null;
+        if (isNumeric(fn.returnType) && isNumeric(valueType)) {
+            if (fn.returnType === 'integer' && valueType === 'float') {
+                this.warn(ctx, `implicit cast float -> integer in return from '${fn.name}' loses precision`);
+            }
+            return null;
+        }
+        this.error(ctx, `cannot return ${valueType} from function '${fn.name}' which returns ${fn.returnType}`);
         return null;
     };
 }
@@ -395,6 +541,11 @@ function isNumeric(t: string): boolean {
 function paramTypes(ctx: ParameterListContext | null): string[] {
     if (!ctx) return [];
     return ctx.parameter_list().map(p => canonical(p.datatype().getText()));
+}
+
+/** 'void' for procedures, otherwise the canonical datatype. */
+function returnTypeOf(ctx: ReturnTypeContext): string {
+    return ctx.VOID() ? 'void' : canonical(ctx.datatype().getText());
 }
 
 /** Maps every spelling of a type onto one canonical name. */

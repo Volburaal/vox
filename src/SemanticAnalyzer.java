@@ -9,6 +9,9 @@ import org.antlr.v4.runtime.Token;
  * during ANTLR's adaptive prediction, so they could run more than once or not
  * at all; running them as a separate pass over the finished parse tree is both
  * correct and keeps the grammar target-independent.
+ *
+ * Diagnostic messages are kept byte-for-byte identical to the TypeScript
+ * engine's so the shared regression suite can assert on them for both.
  */
 public class SemanticAnalyzer extends VoxBaseVisitor<String> {
 
@@ -22,10 +25,55 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         }
     }
 
+    /** What a builtin accepts ("num" or "string" per parameter) and returns. */
+    static final class BuiltinSpec {
+        final String[] params;
+        /** A fixed type, or "numeric" to follow the arguments (float if any float). */
+        final String result;
+        BuiltinSpec(String result, String... params) {
+            this.result = result;
+            this.params = params;
+        }
+    }
+
+    /**
+     * The builtin functions, by their symbolic name. The spoken forms in the
+     * grammar ("square root of") map onto the same names. User-defined
+     * functions take precedence over these, so no name is reserved.
+     */
+    static final Map<String, BuiltinSpec> BUILTINS = new LinkedHashMap<>();
+    static {
+        BUILTINS.put("sqrt",      new BuiltinSpec("float",   "num"));
+        BUILTINS.put("abs",       new BuiltinSpec("numeric", "num"));
+        BUILTINS.put("round",     new BuiltinSpec("integer", "num"));
+        BUILTINS.put("floor",     new BuiltinSpec("integer", "num"));
+        BUILTINS.put("ceiling",   new BuiltinSpec("integer", "num"));
+        BUILTINS.put("min",       new BuiltinSpec("numeric", "num", "num"));
+        BUILTINS.put("max",       new BuiltinSpec("numeric", "num", "num"));
+        BUILTINS.put("length",    new BuiltinSpec("integer", "string"));
+        BUILTINS.put("uppercase", new BuiltinSpec("string",  "string"));
+        BUILTINS.put("lowercase", new BuiltinSpec("string",  "string"));
+    }
+
+    /** Maps a spoken builtin token onto its symbolic name. */
+    static String builtinNameOf(VoxParser.BuiltinNameContext ctx) {
+        if (ctx.SQRT_OF() != null) return "sqrt";
+        if (ctx.ABS_OF() != null) return "abs";
+        if (ctx.LENGTH_OF() != null) return "length";
+        if (ctx.FLOOR_OF() != null) return "floor";
+        if (ctx.CEIL_OF() != null) return "ceiling";
+        if (ctx.UPPER_OF() != null) return "uppercase";
+        return "lowercase";
+    }
+
     private final Map<String, Signature> functions = new LinkedHashMap<>();
     private final Deque<Map<String, String>> scopes = new ArrayDeque<>();
     private final List<String> errors = new ArrayList<>();
     private final List<String> warnings = new ArrayList<>();
+    /** The function being checked; null inside main. */
+    private String currentName = null;
+    private String currentReturnType = null;
+    private int loopDepth = 0;
 
     public List<String> getErrors()   { return errors; }
     public List<String> getWarnings() { return warnings; }
@@ -80,11 +128,11 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         for (VoxParser.FunctionContext f : ctx.function()) {
             if (f.prototype() != null) {
                 declareFunction(f.prototype().ID().getText(),
-                        canonical(f.prototype().returnType().getText()),
+                        returnTypeOf(f.prototype().returnType()),
                         paramTypes(f.prototype().parameterList()), f.prototype());
             } else if (f.definition() != null) {
                 declareFunction(f.definition().ID().getText(),
-                        canonical(f.definition().returnType().getText()),
+                        returnTypeOf(f.definition().returnType()),
                         paramTypes(f.definition().parameterList()), f.definition());
             }
         }
@@ -119,6 +167,11 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         return out;
     }
 
+    /** "void" for procedures, otherwise the canonical datatype. */
+    private static String returnTypeOf(VoxParser.ReturnTypeContext ctx) {
+        return ctx.VOID() != null ? "void" : canonical(ctx.datatype().getText());
+    }
+
     @Override
     public String visitPrototype(VoxParser.PrototypeContext ctx) {
         return null; // nothing to check beyond the signature already recorded
@@ -126,6 +179,8 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
 
     @Override
     public String visitDefinition(VoxParser.DefinitionContext ctx) {
+        currentName = ctx.ID().getText();
+        currentReturnType = returnTypeOf(ctx.returnType());
         enterScope();
         if (ctx.parameterList() != null) {
             for (VoxParser.ParameterContext p : ctx.parameterList().parameter()) {
@@ -140,6 +195,8 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         // The body's own scope, so a local may shadow a parameter.
         visit(ctx.block());
         exitScope();
+        currentName = null;
+        currentReturnType = null;
         return null;
     }
 
@@ -217,6 +274,7 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
                                  String value, String name) {
         if (target == null || value == null) return;
         if (value.equals("error") || target.equals(value)) return;
+        // input() is dynamic: the runtime coerces it to whatever fits.
         if (value.equals("any") || target.equals("any")) return;
 
         boolean targetNum = isNumeric(target);
@@ -240,14 +298,17 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
     public String visitIfStatement(VoxParser.IfStatementContext ctx) {
         requireCondition(ctx.expression());
         visit(ctx.thenBlock);
-        if (ctx.elseBlock != null) visit(ctx.elseBlock);
+        if (ctx.elseIf != null) visit(ctx.elseIf);
+        else if (ctx.elseBlock != null) visit(ctx.elseBlock);
         return null;
     }
 
     @Override
     public String visitWhileLoop(VoxParser.WhileLoopContext ctx) {
         requireCondition(ctx.expression());
+        loopDepth++;
         visit(ctx.block());
+        loopDepth--;
         return null;
     }
 
@@ -258,8 +319,32 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         visit(ctx.variableDeclaration());
         requireCondition(ctx.expression());
         visit(ctx.assignment());
+        loopDepth++;
         visit(ctx.block());
+        loopDepth--;
         exitScope();
+        return null;
+    }
+
+    @Override
+    public String visitBreakStmt(VoxParser.BreakStmtContext ctx) {
+        if (loopDepth == 0) {
+            error(ctx, "'" + ctx.BREAK().getText() + "' can only be used inside a loop");
+        }
+        return null;
+    }
+
+    @Override
+    public String visitContinueStmt(VoxParser.ContinueStmtContext ctx) {
+        if (loopDepth == 0) {
+            error(ctx, "'" + ctx.CONTINUE().getText() + "' can only be used inside a loop");
+        }
+        return null;
+    }
+
+    @Override
+    public String visitExprStmt(VoxParser.ExprStmtContext ctx) {
+        visit(ctx.expression());
         return null;
     }
 
@@ -275,6 +360,30 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
     @Override
     public String visitParenExpr(VoxParser.ParenExprContext ctx) {
         return visit(ctx.expression());
+    }
+
+    @Override
+    public String visitCastExpr(VoxParser.CastExprContext ctx) {
+        String source = visit(ctx.expression());
+        String target = canonical(ctx.datatype().getText());
+        return "error".equals(source) ? "error" : target;
+    }
+
+    @Override
+    public String visitBuiltinExpr(VoxParser.BuiltinExprContext ctx) {
+        String name = builtinNameOf(ctx.builtinName());
+        List<String> argTypes = new ArrayList<>();
+        argTypes.add(visit(ctx.expression()));
+        return checkBuiltin(ctx, name, argTypes);
+    }
+
+    @Override
+    public String visitNegExpr(VoxParser.NegExprContext ctx) {
+        String t = visit(ctx.expression());
+        if ("error".equals(t)) return "error";
+        if ("any".equals(t) || (t != null && isNumeric(t))) return t;
+        error(ctx, "operator '-' cannot be applied to " + t);
+        return "error";
     }
 
     @Override
@@ -313,7 +422,7 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
     private String arithmetic(ParserRuleContext ctx, String l, String r, String op) {
         if ("error".equals(l) || "error".equals(r)) return "error";
         if ("any".equals(l) || "any".equals(r)) return "any";
-        if (isNumeric(l) && isNumeric(r)) {
+        if (l != null && r != null && isNumeric(l) && isNumeric(r)) {
             return ("float".equals(l) || "float".equals(r)) ? "float" : "integer";
         }
         error(ctx, "operator '" + op + "' cannot be applied to " + l + " and " + r);
@@ -336,8 +445,9 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
                               String op, boolean ordered) {
         if ("error".equals(l) || "error".equals(r)) return "error";
         if ("any".equals(l) || "any".equals(r)) return "boolean";
-        boolean ok = (isNumeric(l) && isNumeric(r))
-                || (l.equals(r) && (!ordered || !"boolean".equals(l)));
+        boolean ok = l != null && r != null
+                && ((isNumeric(l) && isNumeric(r))
+                    || (l.equals(r) && (!ordered || !"boolean".equals(l))));
         if (!ok) {
             error(ctx, "operator '" + op + "' cannot compare " + l + " and " + r);
             return "error";
@@ -380,7 +490,15 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
 
     @Override
     public String visitCallExpr(VoxParser.CallExprContext ctx) {
-        return visit(ctx.functionCall());
+        VoxParser.FunctionCallContext call = ctx.functionCall();
+        String t = visit(call);
+        // A procedure call is fine as a statement on its own, but has no value.
+        if ("void".equals(t) && !(ctx.getParent() instanceof VoxParser.ExprStmtContext)) {
+            error(ctx, "procedure '" + call.ID().getText()
+                    + "' returns nothing and cannot be used as a value");
+            return "error";
+        }
+        return t;
     }
 
     @Override
@@ -391,6 +509,7 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
 
         Signature sig = functions.get(name);
         if (sig == null) {
+            if (BUILTINS.containsKey(name)) return checkBuiltin(ctx, name, argTypes);
             error(ctx, "function '" + name + "' is not declared");
             return "error";
         }
@@ -416,6 +535,34 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         return sig.returnType;
     }
 
+    /** Arity and type checks for a builtin; returns its result type. */
+    private String checkBuiltin(ParserRuleContext ctx, String name, List<String> argTypes) {
+        BuiltinSpec spec = BUILTINS.get(name);
+        String result = spec.result;
+        if ("numeric".equals(result)) {
+            result = "integer";
+            if (argTypes.contains("float")) result = "float";
+            else if (argTypes.contains("any")) result = "any";
+        }
+        if (spec.params.length != argTypes.size()) {
+            error(ctx, "function '" + name + "' expects " + spec.params.length
+                    + " argument(s) but got " + argTypes.size());
+            return result;
+        }
+        for (int i = 0; i < argTypes.size(); i++) {
+            String got = argTypes.get(i);
+            if (got == null || "error".equals(got) || "any".equals(got)) continue;
+            String kind = spec.params[i];
+            boolean ok = "num".equals(kind) ? isNumeric(got)
+                    : ("string".equals(got) || "character".equals(got));
+            if (!ok) {
+                error(ctx, "argument " + (i + 1) + " of '" + name + "' expects "
+                        + ("num".equals(kind) ? "a number" : "string") + " but got " + got);
+            }
+        }
+        return result;
+    }
+
     @Override
     public String visitPrintStatement(VoxParser.PrintStatementContext ctx) {
         for (VoxParser.ExpressionContext e : ctx.expression()) visit(e);
@@ -424,7 +571,29 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
 
     @Override
     public String visitReturnStatement(VoxParser.ReturnStatementContext ctx) {
-        if (ctx.expression() != null) visit(ctx.expression());
+        String valueType = ctx.expression() != null ? visit(ctx.expression()) : null;
+        if (currentName == null) return null; // `return` in main just ends the program
+
+        if ("void".equals(currentReturnType)) {
+            if (ctx.expression() != null) {
+                error(ctx, "procedure '" + currentName + "' cannot return a value");
+            }
+            return null;
+        }
+        if (ctx.expression() == null) {
+            error(ctx, "function '" + currentName + "' must return a value of type " + currentReturnType);
+            return null;
+        }
+        if (valueType == null || "error".equals(valueType) || "any".equals(valueType)
+                || valueType.equals(currentReturnType)) return null;
+        if (isNumeric(currentReturnType) && isNumeric(valueType)) {
+            if ("integer".equals(currentReturnType) && "float".equals(valueType)) {
+                warn(ctx, "implicit cast float -> integer in return from '" + currentName + "' loses precision");
+            }
+            return null;
+        }
+        error(ctx, "cannot return " + valueType + " from function '" + currentName
+                + "' which returns " + currentReturnType);
         return null;
     }
 

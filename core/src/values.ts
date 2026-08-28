@@ -73,6 +73,12 @@ function describe(v: VoxValue): string {
     return 'string "' + v + '"';
 }
 
+export function negate(v: VoxValue): VoxValue {
+    if (typeof v === 'bigint') return -v;
+    if (typeof v === 'number') return -v;
+    throw new VoxRuntimeError(`operator '-' needs a number but got ${describe(v)}`);
+}
+
 export function arithmetic(op: string, left: VoxValue, right: VoxValue): VoxValue {
     // '+' doubles as string concatenation.
     if (op === 'add' && (typeof left === 'string' || typeof right === 'string')) {
@@ -185,4 +191,98 @@ export function coerceInput(line: string): VoxValue {
     if (/^-?\d*\.\d+$/.test(t)) return Number(t);
     if (/^(true|false)$/i.test(t)) return t.toLowerCase() === 'true';
     return line;
+}
+
+/** Explicit conversion, `x as integer`. Fails loudly instead of guessing. */
+export function cast(v: VoxValue, type: string): VoxValue {
+    const fail = (): never => {
+        throw new VoxRuntimeError(`cannot convert ${describe(v)} to ${type}`);
+    };
+    switch (type) {
+        case 'integer':
+            if (typeof v === 'bigint') return v;
+            if (typeof v === 'number') {
+                if (!Number.isFinite(v)) return fail();
+                return BigInt(Math.trunc(v));
+            }
+            if (typeof v === 'boolean') return v ? 1n : 0n;
+            if (typeof v === 'string' && /^-?\d+$/.test(v.trim())) return BigInt(v.trim());
+            return fail();
+        case 'float':
+            if (typeof v === 'number') return v;
+            if (typeof v === 'bigint') return Number(v);
+            if (typeof v === 'boolean') return v ? 1 : 0;
+            if (typeof v === 'string' && /^-?(\d+|\d*\.\d+)$/.test(v.trim())) return Number(v.trim());
+            return fail();
+        case 'boolean':
+            if (typeof v === 'boolean') return v;
+            if (typeof v === 'bigint') return v !== 0n;
+            if (typeof v === 'number') return v !== 0;
+            if (typeof v === 'string') {
+                const t = v.trim().toLowerCase();
+                if (t === 'true') return true;
+                if (t === 'false') return false;
+            }
+            return fail();
+        case 'string':
+        case 'character':
+            if (v === null) return fail();
+            return display(v);
+        default:
+            throw new VoxRuntimeError('unknown type in cast: ' + type);
+    }
+}
+
+/** The builtin functions. Spoken forms map onto the same names. */
+export function builtin(name: string, args: VoxValue[]): VoxValue {
+    const arity = (n: number): void => {
+        if (args.length !== n) {
+            throw new VoxRuntimeError(
+                `builtin '${name}' expects ${n} argument(s) but got ${args.length}`);
+        }
+    };
+    const num = (v: VoxValue): bigint | number => {
+        if (!isNumber(v)) {
+            throw new VoxRuntimeError(`'${name}' needs a number but got ${describe(v)}`);
+        }
+        return v;
+    };
+    const str = (v: VoxValue): string => {
+        if (typeof v !== 'string') {
+            throw new VoxRuntimeError(`'${name}' needs a string but got ${describe(v)}`);
+        }
+        return v;
+    };
+
+    switch (name) {
+        case 'sqrt': {
+            arity(1);
+            const x = Number(num(args[0]));
+            if (x < 0) throw new VoxRuntimeError('square root of a negative number: ' + display(args[0]));
+            return Math.sqrt(x);
+        }
+        case 'abs': {
+            arity(1);
+            const x = num(args[0]);
+            return typeof x === 'bigint' ? (x < 0n ? -x : x) : Math.abs(x);
+        }
+        case 'round':   arity(1); return BigInt(Math.round(Number(num(args[0]))));
+        case 'floor':   arity(1); return BigInt(Math.floor(Number(num(args[0]))));
+        case 'ceiling': arity(1); return BigInt(Math.ceil(Number(num(args[0]))));
+        case 'min':
+        case 'max': {
+            arity(2);
+            const a = num(args[0]), b = num(args[1]);
+            const pickMin = name === 'min';
+            if (typeof a === 'bigint' && typeof b === 'bigint') {
+                return pickMin ? (a < b ? a : b) : (a > b ? a : b);
+            }
+            return pickMin ? Math.min(Number(a), Number(b)) : Math.max(Number(a), Number(b));
+        }
+        case 'length':    arity(1); return BigInt(str(args[0]).length);
+        case 'uppercase': arity(1); return str(args[0]).toUpperCase();
+        case 'lowercase': arity(1); return str(args[0]).toLowerCase();
+        default:
+            throw new VoxRuntimeError('unknown builtin: ' + name);
+    }
 }

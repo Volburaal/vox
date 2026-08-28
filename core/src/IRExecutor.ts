@@ -1,4 +1,7 @@
-import { VoxValue, VoxRuntimeError, display, truthy, arithmetic, compare, coerceInput } from './values.js';
+import {
+    VoxValue, VoxRuntimeError, display, truthy, arithmetic, compare, coerceInput,
+    negate, cast, builtin,
+} from './values.js';
 
 export { VoxRuntimeError };
 
@@ -31,6 +34,25 @@ const DEFAULT_STEP_LIMIT = 50_000_000;
  * provideInput() - which is what lets the same core run in a browser, where
  * blocking is impossible. An optional per-call step budget makes run() yield
  * regularly so a worker thread can stay responsive.
+ *
+ * Instruction set
+ *   func_start <name>              marks a function entry
+ *   func_end   <name>              implicit `return` with no value
+ *   param <index> <name>           binds incoming argument #index to <name>
+ *   set <var> <operand>
+ *   input <dest>
+ *   print <operand>...
+ *   not|neg <dest> <operand>
+ *   add|sub|mul|div|mod|power <dest> <left> <right>
+ *   eq|ne|lt|gt|le|ge <dest> <left> <right>
+ *   and|or <dest> <left> <right>
+ *   cast <dest> <operand> <type>
+ *   builtin <dest> <name> [operand...]
+ *   if_false <cond> goto <label>
+ *   goto <label>
+ *   label <label>
+ *   call <func> [arg...] -> <dest>
+ *   return [operand]
  */
 export class IRExecutor {
     /** Receives each line the program prints. */
@@ -154,6 +176,13 @@ export class IRExecutor {
                     break;
                 }
 
+                case 'neg': {
+                    this.require(toks, 3, raw);
+                    this.frame().locals.set(toks[1], negate(this.resolve(toks[2])));
+                    this.pc++;
+                    break;
+                }
+
                 case 'add': case 'sub': case 'mul':
                 case 'div': case 'mod': case 'power': {
                     this.require(toks, 4, raw);
@@ -177,6 +206,22 @@ export class IRExecutor {
                     const l = truthy(this.resolve(toks[2]));
                     const r = truthy(this.resolve(toks[3]));
                     this.frame().locals.set(toks[1], op === 'and' ? (l && r) : (l || r));
+                    this.pc++;
+                    break;
+                }
+
+                case 'cast': {
+                    this.require(toks, 4, raw);
+                    this.frame().locals.set(toks[1], cast(this.resolve(toks[2]), toks[3]));
+                    this.pc++;
+                    break;
+                }
+
+                case 'builtin': {
+                    this.require(toks, 3, raw);
+                    const args: VoxValue[] = [];
+                    for (let i = 3; i < toks.length; i++) args.push(this.resolve(toks[i]));
+                    this.frame().locals.set(toks[1], builtin(toks[2], args));
                     this.pc++;
                     break;
                 }

@@ -11,7 +11,7 @@ prototype      : returnType ID '(' parameterList? ')' ';' ;
 definition     : returnType ID '(' parameterList? ')' block ;
 parameterList  : parameter (',' parameter)* ;
 parameter      : datatype ID ;
-returnType     : datatype ;
+returnType     : datatype | VOID ;
 
 block          : '{' statement* '}' ;
 
@@ -23,12 +23,14 @@ statement
     | forLoop                   # forStmt
     | printStatement ';'        # printStmt
     | returnStatement ';'       # returnStmt
+    | BREAK ';'                 # breakStmt
+    | CONTINUE ';'              # continueStmt
     | expression ';'            # exprStmt
     ;
 
-// A single rule covers `if` and `if/else`, so the IR builder gets two distinct
-// blocks instead of one flattened statement list.
-ifStatement    : IF '(' expression ')' thenBlock=block (ELSE elseBlock=block)? ;
+// A single rule covers `if`, `if/else` and `else if` chains, so the IR builder
+// gets distinct blocks instead of one flattened statement list.
+ifStatement    : IF '(' expression ')' thenBlock=block (ELSE (elseIf=ifStatement | elseBlock=block))? ;
 whileLoop      : WHILE '(' expression ')' block ;
 forLoop        : FOR '(' variableDeclaration forDel expression forDel assignment ')' block ;
 forDel         : WHILE | ACTION | ';' | ',' | ':' ;
@@ -49,9 +51,14 @@ inputExpression : INPUT_CALL '(' ')' | INPUT ;
 functionCall    : ID '(' (expression (',' expression)*)? ')' ;
 
 // Precedence is the order of these alternatives, highest first.
+// Prefix forms (builtins, negation, not) apply to the term that follows them;
+// negation binds looser than power, so -x ^ 2 is -(x ^ 2).
 expression
     : '(' expression ')'                          # parenExpr
+    | expression AS datatype                      # castExpr
+    | builtinName expression                      # builtinExpr
     | <assoc=right> expression POW expression     # powExpr
+    | SUB expression                              # negExpr
     | NOT expression                              # notExpr
     | expression op=(MUL|DIV|MOD) expression      # mulExpr
     | expression op=(ADD|SUB) expression          # addExpr
@@ -69,6 +76,11 @@ expression
     | BOOL                                        # boolExpr
     ;
 
+// Spoken forms of the builtin functions. The symbolic forms (sqrt(x), abs(x),
+// round(x), floor(x), ceiling(x), min(a, b), max(a, b), length(s),
+// uppercase(s), lowercase(s)) are ordinary calls resolved by name.
+builtinName : SQRT_OF | ABS_OF | LENGTH_OF | FLOOR_OF | CEIL_OF | UPPER_OF | LOWER_OF ;
+
 datatype : DATATYPE_INT | DATATYPE_FLOAT | DATATYPE_BOOL | DATATYPE_CHAR | DATATYPE_STRING ;
 
 // ---------------------------------------------- lexer ----------------------------------------------
@@ -77,16 +89,28 @@ datatype : DATATYPE_INT | DATATYPE_FLOAT | DATATYPE_BOOL | DATATYPE_CHAR | DATAT
 // tolerate any run of whitespace, including newlines.
 fragment S : [ \t\r\n]+ ;
 
-MAIN   : 'main' ;
-IF     : 'if' ;
-ELSE   : 'else' ;
-WHILE  : 'while' ;
-FOR    : 'for' ;
-ACTION : 'action' | 'after iteration' ;
-PRINT  : 'print' ;
-INPUT_CALL  : 'input' ;
-INPUT: 'an input' | 'some user input' | 'a user input';
-RETURN : 'return' ;
+MAIN     : 'main' ;
+IF       : 'if' ;
+ELSE     : 'else' | 'otherwise' ;
+WHILE    : 'while' ;
+FOR      : 'for' ;
+ACTION   : 'action' | 'after' S 'iteration' ;
+PRINT    : 'print' ;
+INPUT_CALL : 'input' ;
+INPUT    : 'an' S 'input' | 'some' S 'user' S 'input' | 'a' S 'user' S 'input' ;
+RETURN   : 'return' ;
+BREAK    : 'break' | 'stop' ;
+CONTINUE : 'continue' | 'skip' ;
+VOID     : 'void' | 'nothing' | 'procedure' ;
+AS       : 'as' ;
+
+SQRT_OF   : 'square' S 'root' S 'of' ;
+ABS_OF    : 'absolute' S 'value' S 'of' ;
+LENGTH_OF : 'length' S 'of' ;
+FLOOR_OF  : 'floor' S 'of' ;
+CEIL_OF   : 'ceiling' S 'of' ;
+UPPER_OF  : 'uppercase' S 'of' ;
+LOWER_OF  : 'lowercase' S 'of' ;
 
 DECL_START
     : ('consider'|'suppose') S ('an'|'a')

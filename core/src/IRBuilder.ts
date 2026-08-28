@@ -3,14 +3,21 @@ import VoxParser, {
     ProgramContext, PrototypeContext, DefinitionContext, MainFunctionContext,
     BlockContext, DeclForwardContext, DeclReverseContext, AssignForwardContext,
     AssignReverseContext, IfStatementContext, WhileLoopContext, ForLoopContext,
-    PrintStatementContext, ReturnStatementContext, ParenExprContext,
-    NotExprContext, PowExprContext, MulExprContext, AddExprContext,
-    SubFromExprContext, RelExprContext, EqExprContext, AndExprContext,
-    OrExprContext, IdExprContext, IntExprContext, FloatExprContext,
-    StringExprContext, BoolExprContext, InputExprContext, CallExprContext,
-    FunctionCallContext, ExpressionContext,
+    BreakStmtContext, ContinueStmtContext, PrintStatementContext,
+    ReturnStatementContext, ParenExprContext, CastExprContext,
+    BuiltinExprContext, NegExprContext, NotExprContext, PowExprContext,
+    MulExprContext, AddExprContext, SubFromExprContext, RelExprContext,
+    EqExprContext, AndExprContext, OrExprContext, IdExprContext,
+    IntExprContext, FloatExprContext, StringExprContext, BoolExprContext,
+    InputExprContext, CallExprContext, FunctionCallContext, ExpressionContext,
 } from './gen/VoxParser.js';
-import { canonical } from './SemanticAnalyzer.js';
+import { canonical, BUILTINS, builtinNameOf } from './SemanticAnalyzer.js';
+
+/** Where `stop` and `skip` jump to inside the innermost loop. */
+interface LoopLabels {
+    breakLabel: string;
+    continueLabel: string;
+}
 
 /**
  * Lowers a Vox parse tree into the flat, line-oriented IR that IRExecutor
@@ -24,6 +31,9 @@ export class IRBuilder extends VoxVisitor<string | null> {
     readonly instructions: string[] = [];
     private tempCounter = 0;
     private labelCounter = 0;
+    /** Names of user-defined functions; anything else is looked up as a builtin. */
+    private readonly userFunctions = new Set<string>();
+    private readonly loops: LoopLabels[] = [];
 
     private newTemp(): string { return 't' + this.tempCounter++; }
     private newLabel(kind: string): string { return `L_${kind}_${this.labelCounter++}`; }
@@ -32,6 +42,12 @@ export class IRBuilder extends VoxVisitor<string | null> {
     // ------------------------------------------------------------ program --
 
     visitProgram = (ctx: ProgramContext): null => {
+        for (const f of ctx.function__list()) {
+            const p = f.prototype();
+            const d = f.definition();
+            if (p) this.userFunctions.add(p.ID().getText());
+            if (d) this.userFunctions.add(d.ID().getText());
+        }
         for (const f of ctx.function__list()) this.visit(f);
         this.visit(ctx.mainFunction());
         return null;
@@ -100,20 +116,21 @@ export class IRBuilder extends VoxVisitor<string | null> {
 
     visitIfStatement = (ctx: IfStatementContext): null => {
         const cond = this.visit(ctx.expression());
+        const otherwise = ctx._elseIf ?? ctx._elseBlock;
 
-        if (!ctx._elseBlock) {
+        if (!otherwise) {
             const end = this.newLabel('endif');
             this.emit(`if_false ${cond} goto ${end}`);
             this.visit(ctx._thenBlock);
             this.emit('label ' + end);
         } else {
-            const otherwise = this.newLabel('else');
+            const elseLabel = this.newLabel('else');
             const end = this.newLabel('endif');
-            this.emit(`if_false ${cond} goto ${otherwise}`);
+            this.emit(`if_false ${cond} goto ${elseLabel}`);
             this.visit(ctx._thenBlock);
             this.emit('goto ' + end);
-            this.emit('label ' + otherwise);
-            this.visit(ctx._elseBlock);
+            this.emit('label ' + elseLabel);
+            this.visit(otherwise); // a block, or the next `if` in the chain
             this.emit('label ' + end);
         }
         return null;
@@ -125,7 +142,9 @@ export class IRBuilder extends VoxVisitor<string | null> {
         this.emit('label ' + start);
         const cond = this.visit(ctx.expression());
         this.emit(`if_false ${cond} goto ${end}`);
+        this.loops.push({ breakLabel: end, continueLabel: start });
         this.visit(ctx.block());
+        this.loops.pop();
         this.emit('goto ' + start);
         this.emit('label ' + end);
         return null;
@@ -134,14 +153,29 @@ export class IRBuilder extends VoxVisitor<string | null> {
     visitForLoop = (ctx: ForLoopContext): null => {
         const start = this.newLabel('for');
         const end = this.newLabel('endfor');
+        // `skip` must still run the update step, so it jumps here, not to start.
+        const cont = this.newLabel('forcont');
         this.visit(ctx.variableDeclaration());
         this.emit('label ' + start);
         const cond = this.visit(ctx.expression());
         this.emit(`if_false ${cond} goto ${end}`);
+        this.loops.push({ breakLabel: end, continueLabel: cont });
         this.visit(ctx.block());
+        this.loops.pop();
+        this.emit('label ' + cont);
         this.visit(ctx.assignment());
         this.emit('goto ' + start);
         this.emit('label ' + end);
+        return null;
+    };
+
+    visitBreakStmt = (_ctx: BreakStmtContext): null => {
+        this.emit('goto ' + this.loops[this.loops.length - 1].breakLabel);
+        return null;
+    };
+
+    visitContinueStmt = (_ctx: ContinueStmtContext): null => {
+        this.emit('goto ' + this.loops[this.loops.length - 1].continueLabel);
         return null;
     };
 
@@ -167,6 +201,32 @@ export class IRBuilder extends VoxVisitor<string | null> {
 
     visitParenExpr = (ctx: ParenExprContext): string | null =>
         this.visit(ctx.expression());
+
+    visitCastExpr = (ctx: CastExprContext): string => {
+        const value = this.visit(ctx.expression());
+        const dest = this.newTemp();
+        this.emit(`cast ${dest} ${value} ${canonical(ctx.datatype().getText())}`);
+        return dest;
+    };
+
+    visitBuiltinExpr = (ctx: BuiltinExprContext): string => {
+        const value = this.visit(ctx.expression());
+        const dest = this.newTemp();
+        this.emit(`builtin ${dest} ${builtinNameOf(ctx.builtinName())} ${value}`);
+        return dest;
+    };
+
+    visitNegExpr = (ctx: NegExprContext): string => {
+        const operand = ctx.expression();
+        // A negated numeric literal is just a negative literal.
+        if (operand instanceof IntExprContext || operand instanceof FloatExprContext) {
+            return '-' + operand.getText();
+        }
+        const value = this.visit(operand);
+        const dest = this.newTemp();
+        this.emit(`neg ${dest} ${value}`);
+        return dest;
+    };
 
     visitNotExpr = (ctx: NotExprContext): string => {
         const value = this.visit(ctx.expression());
@@ -228,10 +288,18 @@ export class IRBuilder extends VoxVisitor<string | null> {
         this.visit(ctx.functionCall());
 
     visitFunctionCall = (ctx: FunctionCallContext): string => {
+        const name = ctx.ID().getText();
         const args = ctx.expression_list().map(e => this.visit(e));
-
         const dest = this.newTemp();
-        let line = 'call ' + ctx.ID().getText();
+
+        if (!this.userFunctions.has(name) && BUILTINS.has(name)) {
+            let line = `builtin ${dest} ${name}`;
+            for (const a of args) line += ' ' + a;
+            this.emit(line);
+            return dest;
+        }
+
+        let line = 'call ' + name;
         for (const a of args) line += ' ' + a;
         line += ' -> ' + dest;
         this.emit(line);
