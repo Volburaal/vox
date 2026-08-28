@@ -279,3 +279,50 @@ the empty string for `string` and `character`.
 `input()` reads one line and coerces it: digits become an `integer`,
 `12.5` becomes a `float`, `true`/`false` become a `boolean`, anything else
 stays a `string`. It is accepted wherever a value is expected.
+
+### Negation, casts and builtins
+
+Unary minus works on any number: `-x`, `-(a + b)`, `2 ^ -1`. It binds looser
+than `^`, so `-2 ^ 2` is `-4`.
+
+`value as type` converts explicitly and fails loudly when it cannot:
+
+```java
+integer n <- an input as integer;      // "42" -> 42; "abc" is a runtime error
+float half <- (7 as float) / 2;        // 3.5
+string label <- 5 as string + "!";     // "5!"
+```
+
+Builtin functions have a spoken and a symbolic form; a user-defined function
+with the same name takes precedence:
+
+| Spoken | Symbolic | Result |
+| --- | --- | --- |
+| `square root of x` | `sqrt(x)` | float |
+| `absolute value of x` | `abs(x)` | same type as `x` |
+| `floor of x`, `ceiling of x` | `floor(x)`, `ceiling(x)` | integer |
+| - | `round(x)` | integer |
+| - | `min(a, b)`, `max(a, b)` | float if either is a float |
+| `length of s` | `length(s)` | integer |
+| `uppercase of s`, `lowercase of s` | `uppercase(s)`, `lowercase(s)` | string |
+
+Spoken builtins apply to the term right after them: `length of s + 1` is
+`length(s) + 1`.
+
+### Control flow
+
+- `else if` chains, with `otherwise` as a synonym for `else`.
+- `stop;` (or `break;`) leaves the innermost loop; `skip;` (or `continue;`)
+  moves to its next iteration. Both are compile errors outside a loop.
+
+### Procedures
+
+A function that returns nothing is declared with `procedure`, `void` or
+`nothing`. It may `return;` early but cannot return a value, and calling it
+where a value is expected is a compile error.
+
+```java
+procedure greet(string who) {
+    print("hello, ", who);
+}
+```

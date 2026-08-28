@@ -12,6 +12,7 @@ import { EditorView } from '@codemirror/view';
  */
 
 const DECL_STARTERS = ['let there be an', 'let there be a', 'consider an', 'consider a', 'suppose an', 'suppose a'];
+const KEYWORD_PHRASES = ['some user input', 'a user input', 'after iteration', 'an input'];
 const ASSIGN_PHRASES = ['which is equal to', 'which equals'];
 const TYPE_PHRASES = ['floating point number', 'character string', 'boolean number', 'whole number'];
 const OPERATOR_PHRASES = [
@@ -19,20 +20,32 @@ const OPERATOR_PHRASES = [
   'is greater than', 'is less than', 'subtracted from', 'remainder from',
   'multiplied by', 'divided by', 'equals to', 'added to', 'is not',
 ];
+// Spoken forms of the builtin functions.
+const BUILTIN_PHRASES = [
+  'absolute value of', 'square root of', 'uppercase of', 'lowercase of',
+  'ceiling of', 'length of', 'floor of',
+];
 
-export const PHRASES = [...DECL_STARTERS, ...ASSIGN_PHRASES, ...TYPE_PHRASES, ...OPERATOR_PHRASES]
-  .sort((a, b) => b.length - a.length);
+export const PHRASES = [
+  ...DECL_STARTERS, ...KEYWORD_PHRASES, ...ASSIGN_PHRASES, ...TYPE_PHRASES,
+  ...OPERATOR_PHRASES, ...BUILTIN_PHRASES,
+].sort((a, b) => b.length - a.length);
 
-const KEYWORDS = new Set(['main', 'if', 'else', 'while', 'for', 'action', 'print', 'input', 'return']);
+const KEYWORDS = new Set([
+  'main', 'if', 'else', 'otherwise', 'while', 'for', 'action', 'print', 'input', 'return',
+  'break', 'stop', 'continue', 'skip', 'void', 'nothing', 'procedure', 'as',
+]);
 const TYPES = new Set(['int', 'integer', 'number', 'float', 'bool', 'boolean', 'character', 'char', 'string', 'varchar']);
-const WORD_OPERATORS = new Set(['is', 'minus', 'times', 'and', 'or', 'not']);
+const WORD_OPERATORS = new Set(['is', 'minus', 'plus', 'times', 'and', 'or', 'not']);
 const BOOLS = new Set(['true', 'false']);
 
 const phraseKind = new Map<string, string>();
 for (const p of DECL_STARTERS) phraseKind.set(p, 'keyword');
+for (const p of KEYWORD_PHRASES) phraseKind.set(p, 'keyword');
 for (const p of ASSIGN_PHRASES) phraseKind.set(p, 'operator');
 for (const p of TYPE_PHRASES) phraseKind.set(p, 'type');
 for (const p of OPERATOR_PHRASES) phraseKind.set(p, 'operator');
+for (const p of BUILTIN_PHRASES) phraseKind.set(p, 'function');
 
 const PHRASE_RE = new RegExp(
   '^(?:' + PHRASES.map(p => p.split(' ').join('\\s+')).join('|') + ')(?![A-Za-z0-9_])',
