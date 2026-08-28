@@ -108,7 +108,9 @@ done
 # ---- the shipped examples must at least run ---------------------------------
 for src in examples/*.vox; do
     name="$(basename "$src" .vox)"
-    if $VOX_CMD "$src" < /dev/null >/dev/null 2>&1; then
+    stdin_file="examples/$name.in"
+    [ -f "$stdin_file" ] || stdin_file="/dev/null"
+    if $VOX_CMD "$src" < "$stdin_file" >/dev/null 2>&1; then
         echo "ok    example:$name"
         pass=$((pass + 1))
     else

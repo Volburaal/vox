@@ -1,0 +1,17 @@
+procedure greet(string who) {
+    print("hello, ", who);
+}
+nothing countdown(integer n) {
+    while (n > 0) {
+        print(n);
+        n <- n - 1;
+    }
+    return;
+}
+void nop() { }
+main {
+    greet("vox");
+    countdown(3);
+    nop();
+    print("done");
+}

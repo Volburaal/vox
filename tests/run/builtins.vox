@@ -1,0 +1,18 @@
+main {
+    print(square root of 16);
+    print(sqrt(2.25));
+    print(absolute value of -7);
+    print(abs(-2.5));
+    print(round(2.5));
+    print(round(2.4));
+    print(floor of 3.7);
+    print(ceiling of 3.2);
+    print(min(3, 8));
+    print(max(3.5, 2));
+    print(length of "hello");
+    print(length(""));
+    print(uppercase of "vox");
+    print(lowercase("LOUD"));
+    integer n <- length of "abc" + 1;
+    print(n);
+}

@@ -1,0 +1,13 @@
+main {
+    float f <- 3.9;
+    print(f as integer);
+    print((7 as float) / 2);
+    print("42" as integer + 1);
+    print("2.5" as float * 2);
+    print(5 as string + "!");
+    print(true as integer);
+    print(0 as boolean);
+    print("true" as boolean);
+    print(3.0 as string);
+    print(-7.9 as integer);
+}

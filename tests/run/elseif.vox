@@ -1,0 +1,15 @@
+integer grade(integer s) {
+    if (s >= 90) { return 4; }
+    else if (s >= 80) { return 3; }
+    otherwise if (s >= 70) { return 2; }
+    otherwise { return 1; }
+}
+main {
+    print(grade(95));
+    print(grade(85));
+    print(grade(75));
+    print(grade(10));
+    integer n <- 7;
+    if (n == 1) { print("one"); }
+    else if (n == 7) { print("seven"); }
+}

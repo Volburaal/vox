@@ -1,0 +1,4 @@
+procedure p() {
+    return 5;
+}
+main { p(); }

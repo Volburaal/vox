@@ -1,0 +1,4 @@
+main {
+    string s <- "abc";
+    print(s as integer);
+}

@@ -1,0 +1,4 @@
+integer f() {
+    return;
+}
+main { print(f()); }
