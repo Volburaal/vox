@@ -5,6 +5,7 @@ import hailstone from '../../examples/hailstone.vox?raw';
 import factorial from '../../examples/factorial.vox?raw';
 import fibonacci from '../../examples/fibonacci.vox?raw';
 import natural from '../../examples/natural.vox?raw';
+import counting from '../../examples/counting.vox?raw';
 
 export interface Example {
   id: string;
@@ -25,6 +26,12 @@ export const EXAMPLES: Example[] = [
     name: 'Natural syntax',
     blurb: 'Every spelling Vox accepts, in one program.',
     source: natural,
+  },
+  {
+    id: 'counting',
+    name: 'Counting',
+    blurb: 'Range loops, countdowns and in-place updates.',
+    source: counting,
   },
   {
     id: 'factorial',

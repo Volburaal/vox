@@ -124,6 +124,79 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         return null;
     }
 
+    // ------------------------------------------------------------ updates --
+    // `n += x` and every spoken spelling of it become one instruction whose
+    // destination is also its first operand: `add n n x`.
+
+    @Override
+    public String visitIncStmt(VoxParser.IncStmtContext ctx) {
+        return update("add", ctx.ID().getText(), "1");
+    }
+
+    @Override
+    public String visitDecStmt(VoxParser.DecStmtContext ctx) {
+        return update("sub", ctx.ID().getText(), "1");
+    }
+
+    @Override
+    public String visitOpAssign(VoxParser.OpAssignContext ctx) {
+        String op;
+        switch (ctx.op.getType()) {
+            case VoxParser.ADD_ASSIGN: op = "add"; break;
+            case VoxParser.SUB_ASSIGN: op = "sub"; break;
+            case VoxParser.MUL_ASSIGN: op = "mul"; break;
+            case VoxParser.DIV_ASSIGN: op = "div"; break;
+            case VoxParser.MOD_ASSIGN: op = "mod"; break;
+            default:                   op = "power"; break;
+        }
+        return update(op, ctx.ID().getText(), visit(ctx.expression()));
+    }
+
+    @Override
+    public String visitIncreaseBy(VoxParser.IncreaseByContext ctx) {
+        return update("add", ctx.ID().getText(), visit(ctx.expression()));
+    }
+
+    @Override
+    public String visitDecreaseBy(VoxParser.DecreaseByContext ctx) {
+        return update("sub", ctx.ID().getText(), visit(ctx.expression()));
+    }
+
+    @Override
+    public String visitAddTo(VoxParser.AddToContext ctx) {
+        return update("add", ctx.ID().getText(), visit(ctx.expression()));
+    }
+
+    @Override
+    public String visitTakeFrom(VoxParser.TakeFromContext ctx) {
+        return update("sub", ctx.ID().getText(), visit(ctx.expression()));
+    }
+
+    @Override
+    public String visitMultiplyBy(VoxParser.MultiplyByContext ctx) {
+        return update("mul", ctx.ID().getText(), visit(ctx.expression()));
+    }
+
+    @Override
+    public String visitDivideBy(VoxParser.DivideByContext ctx) {
+        return update("div", ctx.ID().getText(), visit(ctx.expression()));
+    }
+
+    @Override
+    public String visitDoubleStmt(VoxParser.DoubleStmtContext ctx) {
+        return update("mul", ctx.ID().getText(), "2");
+    }
+
+    @Override
+    public String visitHalveStmt(VoxParser.HalveStmtContext ctx) {
+        return update("div", ctx.ID().getText(), "2");
+    }
+
+    private String update(String op, String name, String operand) {
+        emit(op + " " + name + " " + name + " " + operand);
+        return null;
+    }
+
     // ------------------------------------------------------------ control --
 
     @Override
@@ -179,10 +252,63 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         visit(ctx.block());
         loops.pop();
         emit("label " + cont);
-        visit(ctx.assignment());
+        visit(ctx.forUpdate());
         emit("goto " + start);
         emit("label " + end);
         return null;
+    }
+
+    /**
+     * `for i from a to b step s` is the classic loop with the condition and
+     * update chosen by the direction word: `le`/`add` for `to`, `lt`/`add` for
+     * `until`, `ge`/`sub` for `down to`.
+     */
+    @Override
+    public String visitRangeLoop(VoxParser.RangeLoopContext ctx) {
+        VoxParser.RangeClauseContext rc = ctx.rangeClause();
+        String name = rc.ID().getText();
+        String start = newLabel("for");
+        String end = newLabel("endfor");
+        String cont = newLabel("forcont");
+        boolean down = rc.dir.getType() == VoxParser.DOWN_TO;
+        String compare = down ? "ge" : rc.dir.getType() == VoxParser.UNTIL ? "lt" : "le";
+
+        // Every bound is evaluated before the loop variable is assigned, so
+        // `for i from 1 to i + 2` measures the outer i.
+        String first = visit(rc.start);
+        String limit = frozen(rc.limit);
+        String step = rc.step != null ? frozen(rc.step) : "1";
+        emit("set " + name + " " + first);
+
+        emit("label " + start);
+        String cond = newTemp();
+        emit(compare + " " + cond + " " + name + " " + limit);
+        emit("if_false " + cond + " goto " + end);
+        loops.push(new LoopLabels(end, cont));
+        visit(ctx.block());
+        loops.pop();
+        emit("label " + cont);
+        emit((down ? "sub" : "add") + " " + name + " " + name + " " + step);
+        emit("goto " + start);
+        emit("label " + end);
+        return null;
+    }
+
+    /**
+     * Evaluates a loop bound once. A bound that is a plain variable is copied
+     * into a temporary so the body cannot move the goalposts by reassigning
+     * it; a literal or a computed temporary is already fixed.
+     */
+    private String frozen(VoxParser.ExpressionContext expr) {
+        String value = visit(expr);
+        VoxParser.ExpressionContext inner = expr;
+        while (inner instanceof VoxParser.ParenExprContext) {
+            inner = ((VoxParser.ParenExprContext) inner).expression();
+        }
+        if (!(inner instanceof VoxParser.IdExprContext)) return value;
+        String copy = newTemp();
+        emit("set " + copy + " " + value);
+        return copy;
     }
 
     @Override
@@ -250,6 +376,15 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         String value = visit(operand);
         String dest = newTemp();
         emit("neg " + dest + " " + value);
+        return dest;
+    }
+
+    /** `x squared` and `x cubed` are just powers with a literal exponent. */
+    @Override
+    public String visitSquaredExpr(VoxParser.SquaredExprContext ctx) {
+        String value = visit(ctx.expression());
+        String dest = newTemp();
+        emit("power " + dest + " " + value + " " + (ctx.op.getType() == VoxParser.SQUARED ? 2 : 3));
         return dest;
     }
 

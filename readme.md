@@ -14,9 +14,10 @@
 
 - Variables and data types
 - Arithmetic and logical expressions, with real operator precedence
-- Conditionals (`if`, `if-else`)
-- Loops (`while`, `for`)
-- Functions, forward declarations, and recursion
+- Conditionals (`if`, `else if`, `otherwise`)
+- Loops: `while`, the classic `for`, and range loops (`for i from 1 to 10`, `down to`, `step`)
+- In-place updates in both spellings: `n++` / `increment n`, `n += 3` / `add 3 to n`, `double n`
+- Functions, procedures, forward declarations, and recursion
 - Input/Output operations
 
 ## Architecture Overview
@@ -233,17 +234,23 @@ main {
 | Level | Operators |
 | --- | --- |
 | 1 | `( )` |
-| 2 | `^` / `to the power of` (right associative) |
-| 3 | `not` / `!` / `~` |
-| 4 | `*` `/` `%` / `multiplied by` / `times` / `divided by` / `remainder from` |
-| 5 | `+` `-` / `added to` / `minus` |
-| 6 | `subtracted from` |
-| 7 | `<` `>` `<=` `>=` / `is less than` / `is greater than` / ... |
-| 8 | `==` `!=` / `equals to` / `is` / `is not` |
-| 9 | `&&` `&` / `and` |
-| 10 | `\|\|` `\|` / `or` |
+| 2 | `as` (cast) |
+| 3 | `squared`, `cubed` |
+| 4 | spoken builtins: `square root of`, `length of`, ... |
+| 5 | `^` `**` / `to the power of` / `raised to the power of` (right associative) |
+| 6 | unary `-` |
+| 7 | `not` / `!` / `~` |
+| 8 | `*` `/` `%` / `multiplied by` / `times` / `divided by` / `remainder from` |
+| 9 | `+` `-` / `added to` / `plus` / `minus` |
+| 10 | `subtracted from` |
+| 11 | `<` `>` `<=` `>=` / `is less than` / `is greater than` / ... |
+| 12 | `==` `!=` / `is` / `is equal to` / `equals` / `equals to` / `is not` |
+| 13 | `&&` `&` / `and` |
+| 14 | `\|\|` `\|` / `or` |
 
-`a subtracted from b` evaluates to `b - a`.
+`a subtracted from b` evaluates to `b - a`. Prefix and postfix forms apply to
+the term next to them: `-x squared` is `-(x squared)`, `2 * x squared` is
+`2 * (x squared)`, and `square root of x squared` is `sqrt(x squared)`.
 
 Multi-word operators and declaration starters may span newlines, so this is
 valid:
@@ -314,6 +321,59 @@ Spoken builtins apply to the term right after them: `length of s + 1` is
 - `else if` chains, with `otherwise` as a synonym for `else`.
 - `stop;` (or `break;`) leaves the innermost loop; `skip;` (or `continue;`)
   moves to its next iteration. Both are compile errors outside a loop.
+
+### In-place updates
+
+An update changes a variable where it stands. Updates are statements, not
+expressions: `i++` has no value, so `x <- i++` is a syntax error rather than a
+trap. Every spoken form lowers to the same single IR instruction as its
+symbolic twin.
+
+| Symbolic | Spoken |
+| --- | --- |
+| `n++;` / `++n;` | `increment n;`, `increment the n;`, `n is incremented;` |
+| `n--;` / `--n;` | `decrement n;`, `decrement the n;`, `n is decremented;` |
+| `n += x;` | `increase n by x;`, `add x to n;`, `x is added to n;` |
+| `n -= x;` | `decrease n by x;`, `subtract x from n;`, `take x from n;`, `remove x from n;`, `x is subtracted from n;` |
+| `n *= x;` | `multiply n by x;` |
+| `n /= x;` | `divide n by x;` |
+| `n %= x;` | - |
+| `n ^= x;` / `n **= x;` | - |
+| `n *= 2;` | `double n;`, `n is doubled;` |
+| `n /= 2;` | `halve n;`, `n is halved;` |
+
+`the` is optional after every verb (`add 3 to the total`). An update is
+type-checked exactly like the assignment it stands for: `s += "!"` concatenates
+when `s` is a string, `halve n` on an integer is integer division, and
+`increment name` on a string is a compile error. The classic `for` loop takes
+an update as its third clause: `for (integer i <- 1; i <= 5; i++)`.
+
+The verbs and the range-loop words (`add`, `double`, `to`, `from`, `by`,
+`the`, `step`, `until`, ...) are keywords, so they cannot name a variable or a
+function.
+
+### Range loops
+
+```java
+for i from 1 to 10 { ... }             // 1, 2, ..., 10
+for i from 0 until 10 { ... }          // 0, 1, ..., 9
+for i from 10 down to 1 { ... }        // 10, 9, ..., 1
+for i from 0 to 100 step 5 { ... }     // also: by 5, in steps of 5
+for float x from 0.0 to 1.0 step 0.25 { ... }
+```
+
+`to` is inclusive, `until` is exclusive and `down to` counts down. The loop
+variable is a fresh `integer` (or the type given) scoped to the loop. The
+start, end and step are evaluated once, before the first iteration, so
+reassigning the bound inside the body does not change how many times it runs.
+The step must be positive; to count down, say `down to`. Parentheses around the
+clause are optional.
+
+### Powers
+
+`x ^ y`, `x ** y`, `x to the power of y` and `x raised to the power of y` are
+the same operator. `x squared` and `x cubed` are postfix spellings of `x ^ 2`
+and `x ^ 3`.
 
 ### Procedures
 

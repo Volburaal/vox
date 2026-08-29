@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
-import { Eraser } from 'lucide-react';
-import type { ConsoleLine, RunnerStatus } from '../vox/useVoxRunner';
+import { useEffect, useRef, useState } from "react";
+import { Eraser } from "lucide-react";
+import type { ConsoleLine, RunnerStatus } from "../vox/useVoxRunner";
 
 interface Props {
   lines: ConsoleLine[];
@@ -9,34 +9,39 @@ interface Props {
   onClear: () => void;
 }
 
-const LINE_CLASS: Record<ConsoleLine['kind'], string> = {
-  out: 'text-paper',
-  err: 'text-neon-red-soft',
-  warn: 'text-amber',
-  info: 'text-fog italic',
-  in: 'text-neon-blue-soft',
+const LINE_CLASS: Record<ConsoleLine["kind"], string> = {
+  out: "text-paper",
+  err: "text-neon-red-soft",
+  warn: "text-amber",
+  info: "text-fog italic",
+  in: "text-neon-blue-soft",
 };
 
 const STATUS_LABEL: Record<RunnerStatus, string> = {
-  idle: 'ready',
-  running: 'running',
-  waiting: 'waiting for input',
-  done: 'finished',
-  error: 'error',
+  idle: "ready",
+  running: "running",
+  waiting: "waiting for input",
+  done: "finished",
+  error: "error",
 };
 
 const STATUS_CLASS: Record<RunnerStatus, string> = {
-  idle: 'text-fog',
-  running: 'text-neon-blue-soft glow-blue',
-  waiting: 'text-amber',
-  done: 'text-neon-blue-soft',
-  error: 'text-neon-red-soft glow-red',
+  idle: "text-fog",
+  running: "text-neon-blue-soft glow-blue",
+  waiting: "text-amber",
+  done: "text-neon-blue-soft",
+  error: "text-neon-red-soft glow-red",
 };
 
-export default function Console({ lines, status, onSubmitInput, onClear }: Props) {
+export default function Console({
+  lines,
+  status,
+  onSubmitInput,
+  onClear,
+}: Props) {
   const scroller = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState("");
 
   useEffect(() => {
     const el = scroller.current;
@@ -44,13 +49,13 @@ export default function Console({ lines, status, onSubmitInput, onClear }: Props
   }, [lines, status]);
 
   useEffect(() => {
-    if (status === 'waiting') inputRef.current?.focus();
+    if (status === "waiting") inputRef.current?.focus();
   }, [status]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     onSubmitInput(draft);
-    setDraft('');
+    setDraft("");
   };
 
   return (
@@ -58,7 +63,9 @@ export default function Console({ lines, status, onSubmitInput, onClear }: Props
       <div className="flex h-10 shrink-0 items-center justify-between border-b border-line px-4">
         <div className="flex items-center gap-3">
           <span className="panel-title">Output</span>
-          <span className={`text-xs ${STATUS_CLASS[status]}`}>{STATUS_LABEL[status]}</span>
+          <span className={`text-xs ${STATUS_CLASS[status]}`}>
+            {STATUS_LABEL[status]}
+          </span>
         </div>
         <button
           type="button"
@@ -76,27 +83,35 @@ export default function Console({ lines, status, onSubmitInput, onClear }: Props
         className="min-h-0 flex-1 overflow-auto px-4 py-3 font-mono text-[13px] leading-relaxed"
         onClick={() => inputRef.current?.focus()}
       >
-        {lines.length === 0 && status === 'idle' && (
+        {lines.length === 0 && status === "idle" && (
           <p className="text-fog/70">
-            Press <kbd className="rounded border border-line-2 px-1.5 py-0.5 text-[11px]">Ctrl</kbd>
-            {' + '}
-            <kbd className="rounded border border-line-2 px-1.5 py-0.5 text-[11px]">Enter</kbd>
-            {' '}or hit Run.
+            Press{" "}
+            <kbd className="rounded border border-line-2 px-1.5 py-0.5 text-[11px]">
+              Ctrl
+            </kbd>
+            {" + "}
+            <kbd className="rounded border border-line-2 px-1.5 py-0.5 text-[11px]">
+              Enter
+            </kbd>{" "}
+            or hit Run.
           </p>
         )}
-        {lines.map(line => (
-          <div key={line.id} className={`whitespace-pre-wrap break-words ${LINE_CLASS[line.kind]}`}>
+        {lines.map((line) => (
+          <div
+            key={line.id}
+            className={`whitespace-pre-wrap wrap-break-word ${LINE_CLASS[line.kind]}`}
+          >
             {line.text}
           </div>
         ))}
 
-        {status === 'waiting' && (
+        {status === "waiting" && (
           <form onSubmit={submit} className="mt-1 flex items-center gap-2">
             <span className="text-amber">&gt;</span>
             <input
               ref={inputRef}
               value={draft}
-              onChange={e => setDraft(e.target.value)}
+              onChange={(e) => setDraft(e.target.value)}
               autoComplete="off"
               spellCheck={false}
               placeholder="the program is waiting for input…"

@@ -12,13 +12,17 @@ import { EditorView } from '@codemirror/view';
  */
 
 const DECL_STARTERS = ['let there be an', 'let there be a', 'consider an', 'consider a', 'suppose an', 'suppose a'];
-const KEYWORD_PHRASES = ['some user input', 'a user input', 'after iteration', 'an input'];
+const KEYWORD_PHRASES = [
+  'some user input', 'a user input', 'after iteration', 'an input', 'in steps of', 'down to',
+];
 const ASSIGN_PHRASES = ['which is equal to', 'which equals'];
 const TYPE_PHRASES = ['floating point number', 'character string', 'boolean number', 'whole number'];
 const OPERATOR_PHRASES = [
-  'is greater or equal to', 'is less or equal to', 'to the power of',
-  'is greater than', 'is less than', 'subtracted from', 'remainder from',
-  'multiplied by', 'divided by', 'equals to', 'added to', 'is not',
+  'raised to the power of', 'is greater or equal to', 'is less or equal to',
+  'is subtracted from', 'to the power of', 'is greater than', 'is decremented',
+  'is incremented', 'subtracted from', 'remainder from', 'is less than',
+  'multiplied by', 'is equal to', 'is added to', 'divided by', 'is doubled',
+  'is halved', 'equals to', 'added to', 'is not',
 ];
 // Spoken forms of the builtin functions.
 const BUILTIN_PHRASES = [
@@ -34,9 +38,16 @@ export const PHRASES = [
 const KEYWORDS = new Set([
   'main', 'if', 'else', 'otherwise', 'while', 'for', 'action', 'print', 'input', 'return',
   'break', 'stop', 'continue', 'skip', 'void', 'nothing', 'procedure', 'as',
+  // range loops
+  'from', 'to', 'until', 'step', 'by', 'the',
+  // in-place updates
+  'increment', 'decrement', 'increase', 'decrease', 'add', 'subtract', 'take',
+  'remove', 'multiply', 'divide', 'double', 'halve',
 ]);
 const TYPES = new Set(['int', 'integer', 'number', 'float', 'bool', 'boolean', 'character', 'char', 'string', 'varchar']);
-const WORD_OPERATORS = new Set(['is', 'minus', 'plus', 'times', 'and', 'or', 'not']);
+const WORD_OPERATORS = new Set([
+  'is', 'equals', 'minus', 'plus', 'times', 'and', 'or', 'not', 'squared', 'cubed',
+]);
 const BOOLS = new Set(['true', 'false']);
 
 const phraseKind = new Map<string, string>();
@@ -50,7 +61,8 @@ for (const p of BUILTIN_PHRASES) phraseKind.set(p, 'function');
 const PHRASE_RE = new RegExp(
   '^(?:' + PHRASES.map(p => p.split(' ').join('\\s+')).join('|') + ')(?![A-Za-z0-9_])',
 );
-const SYMBOL_RE = /^(?:->|<-|<=|>=|=<|=>|==|!=|&&|\|\||[+\-*/%^<>=&|~!])/;
+// Longest first: `**=` before `**` before `*`.
+const SYMBOL_RE = /^(?:\*\*=|\*\*|\+\+|--|\+=|-=|\*=|\/=|%=|\^=|->|<-|<=|>=|=<|=>|==|!=|&&|\|\||[+\-*/%^<>=&|~!])/;
 const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*/;
 
 interface State {

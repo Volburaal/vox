@@ -292,6 +292,87 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         return "integer".equals(t) || "float".equals(t);
     }
 
+    // ------------------------------------------------------------ updates --
+    // Every spoken form is checked as its symbolic twin: `add 3 to n` is `n += 3`.
+
+    @Override
+    public String visitIncStmt(VoxParser.IncStmtContext ctx) {
+        return checkUpdate(ctx, ctx.ID().getText(), "++", "integer");
+    }
+
+    @Override
+    public String visitDecStmt(VoxParser.DecStmtContext ctx) {
+        return checkUpdate(ctx, ctx.ID().getText(), "--", "integer");
+    }
+
+    @Override
+    public String visitOpAssign(VoxParser.OpAssignContext ctx) {
+        return checkUpdate(ctx, ctx.ID().getText(), ctx.op.getText(), visit(ctx.expression()));
+    }
+
+    @Override
+    public String visitIncreaseBy(VoxParser.IncreaseByContext ctx) {
+        return checkUpdate(ctx, ctx.ID().getText(), "+=", visit(ctx.expression()));
+    }
+
+    @Override
+    public String visitDecreaseBy(VoxParser.DecreaseByContext ctx) {
+        return checkUpdate(ctx, ctx.ID().getText(), "-=", visit(ctx.expression()));
+    }
+
+    @Override
+    public String visitAddTo(VoxParser.AddToContext ctx) {
+        return checkUpdate(ctx, ctx.ID().getText(), "+=", visit(ctx.expression()));
+    }
+
+    @Override
+    public String visitTakeFrom(VoxParser.TakeFromContext ctx) {
+        return checkUpdate(ctx, ctx.ID().getText(), "-=", visit(ctx.expression()));
+    }
+
+    @Override
+    public String visitMultiplyBy(VoxParser.MultiplyByContext ctx) {
+        return checkUpdate(ctx, ctx.ID().getText(), "*=", visit(ctx.expression()));
+    }
+
+    @Override
+    public String visitDivideBy(VoxParser.DivideByContext ctx) {
+        return checkUpdate(ctx, ctx.ID().getText(), "/=", visit(ctx.expression()));
+    }
+
+    @Override
+    public String visitDoubleStmt(VoxParser.DoubleStmtContext ctx) {
+        return checkUpdate(ctx, ctx.ID().getText(), "double", "integer");
+    }
+
+    @Override
+    public String visitHalveStmt(VoxParser.HalveStmtContext ctx) {
+        return checkUpdate(ctx, ctx.ID().getText(), "halve", "integer");
+    }
+
+    /** `name op= value` is checked exactly like `name = name op value`. */
+    private String checkUpdate(ParserRuleContext ctx, String name, String op, String valueType) {
+        if (!isVisible(name)) {
+            error(ctx, "variable '" + name + "' is not declared");
+            return null;
+        }
+        String target = typeOf(name);
+        String result;
+        if (op.equals("++") || op.equals("--") || op.equals("double") || op.equals("halve")) {
+            if (!isNumeric(target)) {
+                error(ctx, "operator '" + op + "' cannot be applied to " + target);
+                return null;
+            }
+            result = target;
+        } else if (op.equals("+=") && ("string".equals(target) || "string".equals(valueType))) {
+            result = "string"; // '+' doubles as string concatenation
+        } else {
+            result = arithmetic(ctx, target, valueType, op);
+        }
+        checkAssignable(ctx, target, result, name);
+        return null;
+    }
+
     // ------------------------------------------------------------ control --
 
     @Override
@@ -318,11 +399,67 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         enterScope();
         visit(ctx.variableDeclaration());
         requireCondition(ctx.expression());
-        visit(ctx.assignment());
+        visit(ctx.forUpdate());
         loopDepth++;
         visit(ctx.block());
         loopDepth--;
         exitScope();
+        return null;
+    }
+
+    @Override
+    public String visitRangeLoop(VoxParser.RangeLoopContext ctx) {
+        VoxParser.RangeClauseContext rc = ctx.rangeClause();
+        String name = rc.ID().getText();
+        String varType = rc.datatype() != null ? canonical(rc.datatype().getText()) : "integer";
+        // The bounds are evaluated before the loop variable exists, so
+        // `for i from i to 10` refers to an outer i.
+        String startType = visit(rc.start);
+        String limitType = visit(rc.limit);
+        String stepType = rc.step != null ? visit(rc.step) : null;
+
+        if (!isNumeric(varType)) {
+            error(rc.datatype(), "loop variable '" + name + "' must be a number, not " + varType);
+        }
+        requireNumber(rc.start, startType, "loop start");
+        requireNumber(rc.limit, limitType, "loop end");
+        if (rc.step != null) {
+            requireNumber(rc.step, stepType, "loop step");
+            Double literal = literalValue(rc.step);
+            if (literal != null && literal <= 0) {
+                error(rc.step, "loop step must be positive; use 'down to' to count down");
+            }
+        }
+
+        // The loop variable belongs to a scope enclosing the body.
+        enterScope();
+        define(name, varType);
+        if (isNumeric(varType)) {
+            checkAssignable(rc, varType, startType, name);
+            if (rc.step != null) checkAssignable(rc.step, varType, stepType, name);
+        }
+        loopDepth++;
+        visit(ctx.block());
+        loopDepth--;
+        exitScope();
+        return null;
+    }
+
+    private void requireNumber(ParserRuleContext ctx, String t, String what) {
+        if (t == null || "error".equals(t) || "any".equals(t) || isNumeric(t)) return;
+        error(ctx, what + " must be a number but got " + t);
+    }
+
+    /** The value of a numeric literal (possibly negated or parenthesised), else null. */
+    private static Double literalValue(VoxParser.ExpressionContext e) {
+        while (e instanceof VoxParser.ParenExprContext) e = ((VoxParser.ParenExprContext) e).expression();
+        if (e instanceof VoxParser.IntExprContext || e instanceof VoxParser.FloatExprContext) {
+            return Double.parseDouble(e.getText());
+        }
+        if (e instanceof VoxParser.NegExprContext) {
+            Double inner = literalValue(((VoxParser.NegExprContext) e).expression());
+            return inner == null ? null : -inner;
+        }
         return null;
     }
 
@@ -344,7 +481,15 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
 
     @Override
     public String visitExprStmt(VoxParser.ExprStmtContext ctx) {
-        visit(ctx.expression());
+        VoxParser.ExpressionContext e = ctx.expression();
+        visit(e);
+        // `x is equal to 5;` compares and throws the answer away. Say so,
+        // because in a spoken language it reads like an assignment.
+        if (e instanceof VoxParser.EqExprContext) {
+            warn(e, "comparison has no effect; to assign, use '<-', '=' or 'which is equal to'");
+        } else if (!(e instanceof VoxParser.CallExprContext) && !(e instanceof VoxParser.InputExprContext)) {
+            warn(e, "expression has no effect");
+        }
         return null;
     }
 
@@ -383,6 +528,15 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         if ("error".equals(t)) return "error";
         if ("any".equals(t) || (t != null && isNumeric(t))) return t;
         error(ctx, "operator '-' cannot be applied to " + t);
+        return "error";
+    }
+
+    @Override
+    public String visitSquaredExpr(VoxParser.SquaredExprContext ctx) {
+        String t = visit(ctx.expression());
+        if ("error".equals(t)) return "error";
+        if ("any".equals(t) || (t != null && isNumeric(t))) return t;
+        error(ctx, "operator '" + ctx.op.getText() + "' cannot be applied to " + t);
         return "error";
     }
 
