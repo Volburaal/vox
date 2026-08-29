@@ -3,9 +3,12 @@ import VoxParser, {
     ProgramContext, PrototypeContext, DefinitionContext, MainFunctionContext,
     BlockContext, DeclForwardContext, DeclReverseContext, AssignForwardContext,
     AssignReverseContext, IfStatementContext, WhileLoopContext, ForLoopContext,
-    BreakStmtContext, ContinueStmtContext, PrintStatementContext,
+    RangeLoopContext, BreakStmtContext, ContinueStmtContext, IncStmtContext,
+    DecStmtContext, OpAssignContext, IncreaseByContext, DecreaseByContext,
+    AddToContext, TakeFromContext, MultiplyByContext, DivideByContext,
+    DoubleStmtContext, HalveStmtContext, PrintStatementContext,
     ReturnStatementContext, ParenExprContext, CastExprContext,
-    BuiltinExprContext, NegExprContext, NotExprContext, PowExprContext,
+    BuiltinExprContext, NegExprContext, SquaredExprContext, NotExprContext, PowExprContext,
     MulExprContext, AddExprContext, SubFromExprContext, RelExprContext,
     EqExprContext, AndExprContext, OrExprContext, IdExprContext,
     IntExprContext, FloatExprContext, StringExprContext, BoolExprContext,
@@ -112,6 +115,42 @@ export class IRBuilder extends VoxVisitor<string | null> {
         return null;
     };
 
+    // ------------------------------------------------------------ updates --
+    // `n += x` and every spoken spelling of it become one instruction whose
+    // destination is also its first operand: `add n n x`.
+
+    visitIncStmt = (ctx: IncStmtContext): null => this.update('add', ctx.ID().getText(), '1');
+    visitDecStmt = (ctx: DecStmtContext): null => this.update('sub', ctx.ID().getText(), '1');
+
+    visitOpAssign = (ctx: OpAssignContext): null => {
+        const op = ctx._op.type === VoxParser.ADD_ASSIGN ? 'add'
+            : ctx._op.type === VoxParser.SUB_ASSIGN ? 'sub'
+            : ctx._op.type === VoxParser.MUL_ASSIGN ? 'mul'
+            : ctx._op.type === VoxParser.DIV_ASSIGN ? 'div'
+            : ctx._op.type === VoxParser.MOD_ASSIGN ? 'mod' : 'power';
+        return this.update(op, ctx.ID().getText(), this.visit(ctx.expression())!);
+    };
+
+    visitIncreaseBy = (ctx: IncreaseByContext): null =>
+        this.update('add', ctx.ID().getText(), this.visit(ctx.expression())!);
+    visitDecreaseBy = (ctx: DecreaseByContext): null =>
+        this.update('sub', ctx.ID().getText(), this.visit(ctx.expression())!);
+    visitAddTo = (ctx: AddToContext): null =>
+        this.update('add', ctx.ID().getText(), this.visit(ctx.expression())!);
+    visitTakeFrom = (ctx: TakeFromContext): null =>
+        this.update('sub', ctx.ID().getText(), this.visit(ctx.expression())!);
+    visitMultiplyBy = (ctx: MultiplyByContext): null =>
+        this.update('mul', ctx.ID().getText(), this.visit(ctx.expression())!);
+    visitDivideBy = (ctx: DivideByContext): null =>
+        this.update('div', ctx.ID().getText(), this.visit(ctx.expression())!);
+    visitDoubleStmt = (ctx: DoubleStmtContext): null => this.update('mul', ctx.ID().getText(), '2');
+    visitHalveStmt = (ctx: HalveStmtContext): null => this.update('div', ctx.ID().getText(), '2');
+
+    private update(op: string, name: string, operand: string): null {
+        this.emit(`${op} ${name} ${name} ${operand}`);
+        return null;
+    }
+
     // ------------------------------------------------------------ control --
 
     visitIfStatement = (ctx: IfStatementContext): null => {
@@ -163,11 +202,61 @@ export class IRBuilder extends VoxVisitor<string | null> {
         this.visit(ctx.block());
         this.loops.pop();
         this.emit('label ' + cont);
-        this.visit(ctx.assignment());
+        this.visit(ctx.forUpdate());
         this.emit('goto ' + start);
         this.emit('label ' + end);
         return null;
     };
+
+    /**
+     * `for i from a to b step s` is the classic loop with the condition and
+     * update chosen by the direction word: `le`/`add` for `to`, `lt`/`add` for
+     * `until`, `ge`/`sub` for `down to`.
+     */
+    visitRangeLoop = (ctx: RangeLoopContext): null => {
+        const rc = ctx.rangeClause();
+        const name = rc.ID().getText();
+        const start = this.newLabel('for');
+        const end = this.newLabel('endfor');
+        const cont = this.newLabel('forcont');
+        const down = rc._dir.type === VoxParser.DOWN_TO;
+        const compare = down ? 'ge' : rc._dir.type === VoxParser.UNTIL ? 'lt' : 'le';
+
+        // Every bound is evaluated before the loop variable is assigned, so
+        // `for i from 1 to i + 2` measures the outer i.
+        const first = this.visit(rc._start);
+        const limit = this.frozen(rc._limit);
+        const step = rc._step ? this.frozen(rc._step) : '1';
+        this.emit(`set ${name} ${first}`);
+
+        this.emit('label ' + start);
+        const cond = this.newTemp();
+        this.emit(`${compare} ${cond} ${name} ${limit}`);
+        this.emit(`if_false ${cond} goto ${end}`);
+        this.loops.push({ breakLabel: end, continueLabel: cont });
+        this.visit(ctx.block());
+        this.loops.pop();
+        this.emit('label ' + cont);
+        this.emit(`${down ? 'sub' : 'add'} ${name} ${name} ${step}`);
+        this.emit('goto ' + start);
+        this.emit('label ' + end);
+        return null;
+    };
+
+    /**
+     * Evaluates a loop bound once. A bound that is a plain variable is copied
+     * into a temporary so the body cannot move the goalposts by reassigning
+     * it; a literal or a computed temporary is already fixed.
+     */
+    private frozen(expr: ExpressionContext): string {
+        const value = this.visit(expr)!;
+        let inner = expr;
+        while (inner instanceof ParenExprContext) inner = inner.expression();
+        if (!(inner instanceof IdExprContext)) return value;
+        const copy = this.newTemp();
+        this.emit(`set ${copy} ${value}`);
+        return copy;
+    }
 
     visitBreakStmt = (_ctx: BreakStmtContext): null => {
         this.emit('goto ' + this.loops[this.loops.length - 1].breakLabel);
@@ -225,6 +314,14 @@ export class IRBuilder extends VoxVisitor<string | null> {
         const value = this.visit(operand);
         const dest = this.newTemp();
         this.emit(`neg ${dest} ${value}`);
+        return dest;
+    };
+
+    /** `x squared` and `x cubed` are just powers with a literal exponent. */
+    visitSquaredExpr = (ctx: SquaredExprContext): string => {
+        const value = this.visit(ctx.expression());
+        const dest = this.newTemp();
+        this.emit(`power ${dest} ${value} ${ctx._op.type === VoxParser.SQUARED ? 2 : 3}`);
         return dest;
     };
 

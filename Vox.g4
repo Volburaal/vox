@@ -18,9 +18,11 @@ block          : '{' statement* '}' ;
 statement
     : variableDeclaration ';'   # declStmt
     | assignment ';'            # assignStmt
+    | updateStatement ';'       # updateStmt
     | ifStatement               # ifStmt
     | whileLoop                 # whileStmt
     | forLoop                   # forStmt
+    | rangeLoop                 # rangeStmt
     | printStatement ';'        # printStmt
     | returnStatement ';'       # returnStmt
     | BREAK ';'                 # breakStmt
@@ -32,8 +34,18 @@ statement
 // gets distinct blocks instead of one flattened statement list.
 ifStatement    : IF '(' expression ')' thenBlock=block (ELSE (elseIf=ifStatement | elseBlock=block))? ;
 whileLoop      : WHILE '(' expression ')' block ;
-forLoop        : FOR '(' variableDeclaration forDel expression forDel assignment ')' block ;
+forLoop        : FOR '(' variableDeclaration forDel expression forDel forUpdate ')' block ;
 forDel         : WHILE | ACTION | ';' | ',' | ':' ;
+forUpdate      : assignment | updateStatement ;
+
+// `for i from 1 to 10 { ... }`. The bounds and the step are evaluated once,
+// before the first iteration. `to` is inclusive, `until` is exclusive and
+// `down to` counts down. The loop variable is an integer unless a type is given.
+rangeLoop      : FOR '(' rangeClause ')' block
+               | FOR rangeClause block
+               ;
+rangeClause    : datatype? ID FROM start=expression dir=(TO | UNTIL | DOWN_TO) limit=expression
+                 ((STEP | BY) step=expression)? ;
 
 variableDeclaration
     : DECL_START? datatype ID (ASSIGN expression)?   # declForward
@@ -45,6 +57,34 @@ assignment
     | expression RASSIGN ID   # assignReverse
     ;
 
+// In-place updates. These are statements, never expressions: `i++` has no
+// value, so `x <- i++` is a syntax error rather than a trap. Every spoken form
+// lowers to exactly the same IR as its symbolic twin.
+updateStatement
+    : INC ID                                  # incStmt
+    | ID INC                                  # incStmt
+    | INCREMENT THE? ID                       # incStmt
+    | ID IS_INCREMENTED                       # incStmt
+    | DEC ID                                  # decStmt
+    | ID DEC                                  # decStmt
+    | DECREMENT THE? ID                       # decStmt
+    | ID IS_DECREMENTED                       # decStmt
+    | ID op=(ADD_ASSIGN | SUB_ASSIGN | MUL_ASSIGN | DIV_ASSIGN | MOD_ASSIGN | POW_ASSIGN) expression
+                                              # opAssign
+    | INCREASE THE? ID BY expression          # increaseBy
+    | DECREASE THE? ID BY expression          # decreaseBy
+    | ADD_VERB expression TO THE? ID          # addTo
+    | expression IS_ADDED_TO THE? ID          # addTo
+    | SUBTRACT_VERB expression FROM THE? ID   # takeFrom
+    | expression IS_SUBTRACTED_FROM THE? ID   # takeFrom
+    | MULTIPLY THE? ID BY expression          # multiplyBy
+    | DIVIDE THE? ID BY expression            # divideBy
+    | DOUBLE THE? ID                          # doubleStmt
+    | ID IS_DOUBLED                           # doubleStmt
+    | HALVE THE? ID                           # halveStmt
+    | ID IS_HALVED                            # halveStmt
+    ;
+
 printStatement  : PRINT '(' expression (',' expression)* ')' ;
 returnStatement : RETURN expression? ;
 inputExpression : INPUT_CALL '(' ')' | INPUT ;
@@ -52,10 +92,12 @@ functionCall    : ID '(' (expression (',' expression)*)? ')' ;
 
 // Precedence is the order of these alternatives, highest first.
 // Prefix forms (builtins, negation, not) apply to the term that follows them;
-// negation binds looser than power, so -x ^ 2 is -(x ^ 2).
+// negation binds looser than power, so -x ^ 2 is -(x ^ 2) and -x squared is
+// -(x squared).
 expression
     : '(' expression ')'                          # parenExpr
     | expression AS datatype                      # castExpr
+    | expression op=(SQUARED | CUBED)             # squaredExpr
     | builtinName expression                      # builtinExpr
     | <assoc=right> expression POW expression     # powExpr
     | SUB expression                              # negExpr
@@ -86,10 +128,12 @@ datatype : DATATYPE_INT | DATATYPE_FLOAT | DATATYPE_BOOL | DATATYPE_CHAR | DATAT
 // ---------------------------------------------- lexer ----------------------------------------------
 
 // Multi-word keywords are spelled with this fragment between words so they
-// tolerate any run of whitespace, including newlines.
+// tolerate any run of whitespace, including newlines. The lexer always takes
+// the longest match, so `is added to` wins over `is` and `to the power of`
+// wins over `to`.
 fragment S : [ \t\r\n]+ ;
 
-MAIN     : 'main' ;
+MAIN     : 'main' | 'program' | 'code' ;
 IF       : 'if' ;
 ELSE     : 'else' | 'otherwise' ;
 WHILE    : 'while' ;
@@ -103,6 +147,44 @@ BREAK    : 'break' | 'stop' ;
 CONTINUE : 'continue' | 'skip' ;
 VOID     : 'void' | 'nothing' | 'procedure' ;
 AS       : 'as' ;
+
+// Range loops.
+FROM     : 'from' ;
+TO       : 'to' ;
+DOWN_TO  : 'down' S 'to' ;
+UNTIL    : 'until' ;
+STEP     : 'step' | 'in' S 'steps' S 'of' ;
+BY       : 'by' ;
+THE      : 'the' ;
+
+// In-place updates: symbolic ...
+INC        : '++' ;
+DEC        : '--' ;
+ADD_ASSIGN : '+=' ;
+SUB_ASSIGN : '-=' ;
+MUL_ASSIGN : '*=' ;
+DIV_ASSIGN : '/=' ;
+MOD_ASSIGN : '%=' ;
+POW_ASSIGN : '^=' | '**=' ;
+
+// ... and spoken. `is added to` and friends are single tokens so they never
+// collide with `is` (equality) followed by an operator.
+INCREMENT          : 'increment' ;
+DECREMENT          : 'decrement' ;
+IS_INCREMENTED     : 'is' S 'incremented' ;
+IS_DECREMENTED     : 'is' S 'decremented' ;
+INCREASE           : 'increase' ;
+DECREASE           : 'decrease' ;
+ADD_VERB           : 'add' ;
+SUBTRACT_VERB      : 'subtract' | 'take' | 'remove' ;
+IS_ADDED_TO        : 'is' S 'added' S 'to' ;
+IS_SUBTRACTED_FROM : 'is' S 'subtracted' S 'from' ;
+MULTIPLY           : 'multiply' ;
+DIVIDE             : 'divide' ;
+DOUBLE             : 'double' ;
+HALVE              : 'halve' ;
+IS_DOUBLED         : 'is' S 'doubled' ;
+IS_HALVED          : 'is' S 'halved' ;
 
 SQRT_OF   : 'square' S 'root' S 'of' ;
 ABS_OF    : 'absolute' S 'value' S 'of' ;
@@ -122,7 +204,9 @@ DECL_START
 ASSIGN  : '=' | '<-' | 'which' S 'is' S 'equal' S 'to' | 'which' S 'equals' ;
 RASSIGN : '->' ;
 
-POW     : '^'  | 'to' S 'the' S 'power' S 'of' ;
+SQUARED : 'squared' ;
+CUBED   : 'cubed' ;
+POW     : '^' | '**' | 'to' S 'the' S 'power' S 'of' | 'raised' S 'to' S 'the' S 'power' S 'of' ;
 MUL     : '*'  | 'multiplied' S 'by' | 'times' ;
 DIV     : '/'  | 'divided' S 'by' ;
 MOD     : '%'  | 'remainder' S 'from' ;
@@ -134,7 +218,7 @@ GE      : '>=' | '=>' | 'is' S 'greater' S 'or' S 'equal' S 'to' ;
 LT      : '<'  | 'is' S 'less' S 'than' ;
 GT      : '>'  | 'is' S 'greater' S 'than' ;
 NE      : '!=' | 'is' S 'not' ;
-EQ      : '==' | 'equals' S 'to' | 'is' ;
+EQ      : '==' | 'equals' S 'to' | 'equals' | 'is' S 'equal' S 'to' | 'is' ;
 AND     : '&&' | '&' | 'and' ;
 OR      : '||' | '|' | 'or' ;
 NOT     : '~'  | '!' | 'not' ;

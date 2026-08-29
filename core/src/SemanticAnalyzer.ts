@@ -4,10 +4,13 @@ import {
     ProgramContext, PrototypeContext, DefinitionContext, MainFunctionContext,
     BlockContext, ParameterListContext, ReturnTypeContext, DeclForwardContext,
     DeclReverseContext, AssignForwardContext, AssignReverseContext,
-    IfStatementContext, WhileLoopContext, ForLoopContext, BreakStmtContext,
-    ContinueStmtContext, ExprStmtContext, ExpressionContext, ParenExprContext,
+    IfStatementContext, WhileLoopContext, ForLoopContext, RangeLoopContext,
+    BreakStmtContext, ContinueStmtContext, ExprStmtContext, IncStmtContext,
+    DecStmtContext, OpAssignContext, IncreaseByContext, DecreaseByContext,
+    AddToContext, TakeFromContext, MultiplyByContext, DivideByContext,
+    DoubleStmtContext, HalveStmtContext, ExpressionContext, ParenExprContext,
     CastExprContext, BuiltinExprContext, BuiltinNameContext, NegExprContext,
-    NotExprContext, PowExprContext, MulExprContext, AddExprContext,
+    SquaredExprContext, NotExprContext, PowExprContext, MulExprContext, AddExprContext,
     SubFromExprContext, RelExprContext, EqExprContext, AndExprContext,
     OrExprContext, IdExprContext, IntExprContext, FloatExprContext,
     StringExprContext, BoolExprContext, InputExprContext, CallExprContext,
@@ -263,6 +266,66 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         this.error(ctx, `cannot assign ${value} to ${target} '${name}'`);
     }
 
+    // ------------------------------------------------------------ updates --
+    // Every spoken form is checked as its symbolic twin: `add 3 to n` is `n += 3`.
+
+    visitIncStmt = (ctx: IncStmtContext): null =>
+        this.checkUpdate(ctx, ctx.ID().getText(), '++', 'integer');
+
+    visitDecStmt = (ctx: DecStmtContext): null =>
+        this.checkUpdate(ctx, ctx.ID().getText(), '--', 'integer');
+
+    visitOpAssign = (ctx: OpAssignContext): null =>
+        this.checkUpdate(ctx, ctx.ID().getText(), ctx._op.text!, this.visit(ctx.expression()));
+
+    visitIncreaseBy = (ctx: IncreaseByContext): null =>
+        this.checkUpdate(ctx, ctx.ID().getText(), '+=', this.visit(ctx.expression()));
+
+    visitDecreaseBy = (ctx: DecreaseByContext): null =>
+        this.checkUpdate(ctx, ctx.ID().getText(), '-=', this.visit(ctx.expression()));
+
+    visitAddTo = (ctx: AddToContext): null =>
+        this.checkUpdate(ctx, ctx.ID().getText(), '+=', this.visit(ctx.expression()));
+
+    visitTakeFrom = (ctx: TakeFromContext): null =>
+        this.checkUpdate(ctx, ctx.ID().getText(), '-=', this.visit(ctx.expression()));
+
+    visitMultiplyBy = (ctx: MultiplyByContext): null =>
+        this.checkUpdate(ctx, ctx.ID().getText(), '*=', this.visit(ctx.expression()));
+
+    visitDivideBy = (ctx: DivideByContext): null =>
+        this.checkUpdate(ctx, ctx.ID().getText(), '/=', this.visit(ctx.expression()));
+
+    visitDoubleStmt = (ctx: DoubleStmtContext): null =>
+        this.checkUpdate(ctx, ctx.ID().getText(), 'double', 'integer');
+
+    visitHalveStmt = (ctx: HalveStmtContext): null =>
+        this.checkUpdate(ctx, ctx.ID().getText(), 'halve', 'integer');
+
+    /** `name op= value` is checked exactly like `name = name op value`. */
+    private checkUpdate(ctx: ParserRuleContext, name: string, op: string,
+                        valueType: string | null): null {
+        if (!this.isVisible(name)) {
+            this.error(ctx, `variable '${name}' is not declared`);
+            return null;
+        }
+        const target = this.typeOf(name)!;
+        let result: string;
+        if (op === '++' || op === '--' || op === 'double' || op === 'halve') {
+            if (!isNumeric(target)) {
+                this.error(ctx, `operator '${op}' cannot be applied to ${target}`);
+                return null;
+            }
+            result = target;
+        } else if (op === '+=' && (target === 'string' || valueType === 'string')) {
+            result = 'string'; // '+' doubles as string concatenation
+        } else {
+            result = this.arithmetic(ctx, target, valueType, op);
+        }
+        this.checkAssignable(ctx, target, result, name);
+        return null;
+    }
+
     // ------------------------------------------------------------ control --
 
     visitIfStatement = (ctx: IfStatementContext): null => {
@@ -286,13 +349,55 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         this.enterScope();
         this.visit(ctx.variableDeclaration());
         this.requireCondition(ctx.expression());
-        this.visit(ctx.assignment());
+        this.visit(ctx.forUpdate());
         this.loopDepth++;
         this.visit(ctx.block());
         this.loopDepth--;
         this.exitScope();
         return null;
     };
+
+    visitRangeLoop = (ctx: RangeLoopContext): null => {
+        const rc = ctx.rangeClause();
+        const name = rc.ID().getText();
+        const varType = rc.datatype() ? canonical(rc.datatype()!.getText()) : 'integer';
+        // The bounds are evaluated before the loop variable exists, so
+        // `for i from i to 10` refers to an outer i.
+        const startType = this.visit(rc._start);
+        const limitType = this.visit(rc._limit);
+        const stepType = rc._step ? this.visit(rc._step) : null;
+
+        if (!isNumeric(varType)) {
+            this.error(rc.datatype()!, `loop variable '${name}' must be a number, not ${varType}`);
+        }
+        this.requireNumber(rc._start, startType, 'loop start');
+        this.requireNumber(rc._limit, limitType, 'loop end');
+        if (rc._step) {
+            this.requireNumber(rc._step, stepType, 'loop step');
+            const literal = literalValue(rc._step);
+            if (literal !== null && literal <= 0) {
+                this.error(rc._step, "loop step must be positive; use 'down to' to count down");
+            }
+        }
+
+        // The loop variable belongs to a scope enclosing the body.
+        this.enterScope();
+        this.define(name, varType);
+        if (isNumeric(varType)) {
+            this.checkAssignable(rc, varType, startType, name);
+            if (rc._step) this.checkAssignable(rc._step, varType, stepType, name);
+        }
+        this.loopDepth++;
+        this.visit(ctx.block());
+        this.loopDepth--;
+        this.exitScope();
+        return null;
+    };
+
+    private requireNumber(ctx: ParserRuleContext, t: string | null, what: string): void {
+        if (t === null || t === 'error' || t === 'any' || isNumeric(t)) return;
+        this.error(ctx, `${what} must be a number but got ${t}`);
+    }
 
     visitBreakStmt = (ctx: BreakStmtContext): null => {
         if (this.loopDepth === 0) {
@@ -309,7 +414,15 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     };
 
     visitExprStmt = (ctx: ExprStmtContext): null => {
-        this.visit(ctx.expression());
+        const e = ctx.expression();
+        this.visit(e);
+        // `x is equal to 5;` compares and throws the answer away. Say so,
+        // because in a spoken language it reads like an assignment.
+        if (e instanceof EqExprContext) {
+            this.warn(e, "comparison has no effect; to assign, use '<-', '=' or 'which is equal to'");
+        } else if (!(e instanceof CallExprContext) && !(e instanceof InputExprContext)) {
+            this.warn(e, 'expression has no effect');
+        }
         return null;
     };
 
@@ -340,6 +453,14 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         if (t === 'error') return 'error';
         if (t === 'any' || (t !== null && isNumeric(t))) return t;
         this.error(ctx, `operator '-' cannot be applied to ${t}`);
+        return 'error';
+    };
+
+    visitSquaredExpr = (ctx: SquaredExprContext): string => {
+        const t = this.visit(ctx.expression());
+        if (t === 'error') return 'error';
+        if (t === 'any' || (t !== null && isNumeric(t))) return t;
+        this.error(ctx, `operator '${ctx._op.text}' cannot be applied to ${t}`);
         return 'error';
     };
 
@@ -536,6 +657,17 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
 
 function isNumeric(t: string): boolean {
     return t === 'integer' || t === 'float';
+}
+
+/** The value of a numeric literal (possibly negated or parenthesised), else null. */
+function literalValue(e: ExpressionContext): number | null {
+    while (e instanceof ParenExprContext) e = e.expression();
+    if (e instanceof IntExprContext || e instanceof FloatExprContext) return Number(e.getText());
+    if (e instanceof NegExprContext) {
+        const inner = literalValue(e.expression());
+        return inner === null ? null : -inner;
+    }
+    return null;
 }
 
 function paramTypes(ctx: ParameterListContext | null): string[] {
