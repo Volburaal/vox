@@ -1,0 +1,4 @@
+main {
+    integer i <- 0;
+    integer x <- i++;
+}

@@ -1,0 +1,5 @@
+main {
+    for i from 1 to "ten" {
+        print(i);
+    }
+}

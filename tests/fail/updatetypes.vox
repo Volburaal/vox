@@ -1,0 +1,5 @@
+main {
+    string s <- "a";
+    s++;
+    decrease s by 1;
+}

@@ -1,0 +1,62 @@
+// Every spelling of an in-place update, symbolic and spoken.
+main {
+    integer n <- 10;
+    n++;
+    ++n;
+    increment n;
+    increment the n;
+    n is incremented;
+    print(n);
+
+    n--;
+    --n;
+    decrement n;
+    decrement the n;
+    n is decremented;
+    print(n);
+
+    n += 5;
+    n -= 3;
+    n *= 2;
+    n /= 4;
+    n %= 4;
+    n ^= 3;
+    n **= 2;
+    print(n);
+
+    increase n by 6;
+    decrease the n by 10;
+    add 5 to n;
+    5 is added to n;
+    subtract 10 from n;
+    take 5 from the n;
+    remove 5 from n;
+    20 is subtracted from n;
+    multiply n by 3;
+    divide the n by 9;
+    double n;
+    n is doubled;
+    halve n;
+    n is halved;
+    print(n);
+
+    float f <- 1.5;
+    double f;
+    f += 0.25;
+    print(f);
+
+    string s <- "vox";
+    s += "!";
+    add "?" to s;
+    print(s);
+
+    integer sum <- 0;
+    for (integer i <- 1; i <= 4; i++) {
+        sum += i;
+    }
+    print(sum);
+    for (integer j <- 4; j > 0; decrement j) {
+        sum -= 1;
+    }
+    print(sum);
+}
