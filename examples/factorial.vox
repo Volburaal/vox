@@ -14,5 +14,5 @@ integer factorial(integer n) {
 main {
     consider an integer value which is equal to 6;
     factorial(value) -> integer answer;
-    print(answer);
+    say answer;
 }

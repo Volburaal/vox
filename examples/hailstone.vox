@@ -2,7 +2,7 @@
 integer hailstone(integer n) {
 
     while (n is greater than 1) {
-        print(n);
+        say n;
 
         if (n remainder from 2 is 0) {
             n divided by 2 -> n;
@@ -12,7 +12,7 @@ integer hailstone(integer n) {
         }
     }
 
-    print(1);
+    say 1;
     return n;
 }
 

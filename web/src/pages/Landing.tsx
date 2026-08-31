@@ -28,7 +28,7 @@ main {
         total <- i added to total;
     }
 
-    print(total);
+    say total;
 }`;
 const HERO_SNIPPET = `
 main {
@@ -39,7 +39,7 @@ main {
 const NATURAL = `
 integer hailstone(integer n) {
     while (n is greater than 1) {
-        print(n);
+        say n;
         if ((n remainder from 2) is 0) {
             n = n divided by 2;
         } else {
@@ -52,7 +52,7 @@ integer hailstone(integer n) {
 const SYMBOLIC = `
 integer hailstone(integer n) {
     while (n > 1) {
-        print(n);
+        print(n, '\n');
         if (n % 2 == 0) {
             n = n / 2;
         } else {

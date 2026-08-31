@@ -7,7 +7,7 @@ export type ToWorker =
 export type FromWorker =
   | { type: 'compiled'; ir: string[]; warnings: string[] }
   | { type: 'compile-error'; errors: string[]; warnings: string[] }
-  | { type: 'output'; lines: string[] }
+  | { type: 'output'; chunks: string[] } // raw print output; '\n' delimits lines
   | { type: 'need-input' }
   | { type: 'done'; elapsedMs: number }
   | { type: 'runtime-error'; message: string };

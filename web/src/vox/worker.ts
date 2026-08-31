@@ -24,7 +24,7 @@ let startedAt = 0;
 
 function flush(): void {
   if (pending.length === 0) return;
-  port.postMessage({ type: 'output', lines: pending });
+  port.postMessage({ type: 'output', chunks: pending });
   pending = [];
 }
 
@@ -71,7 +71,7 @@ port.onmessage = (event: MessageEvent<ToWorker>) => {
     port.postMessage({ type: 'compiled', ir: result.ir, warnings: result.warnings });
 
     executor = new IRExecutor(result.ir);
-    executor.onOutput = line => { pending.push(line); };
+    executor.onOutput = chunk => { pending.push(chunk); };
     startedAt = performance.now();
     slice();
     return;

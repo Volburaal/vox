@@ -88,6 +88,7 @@ export const voxLanguage = StreamLanguage.define<State>({
     if (stream.match('/*')) { state.inBlockComment = true; return 'comment'; }
 
     if (stream.match(/^"(?:[^"\\]|\\.)*"?/)) return 'string';
+    if (stream.match(/^'(?:[^'\\]|\\.)*'?/)) return 'string';
     if (stream.match(/^\d+\.\d+/) || stream.match(/^\d+/)) return 'number';
 
     const phrase = stream.match(PHRASE_RE) as RegExpMatchArray | null;

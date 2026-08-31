@@ -4,22 +4,22 @@ main {
     for i from 1 to 10 {
         add i to total;
     }
-    print("1 to 10 adds up to ", total);
+    say "1 to 10 adds up to ", total;
 
-    print("countdown:");
+    say "countdown:";
     for i from 5 down to 1 {
-        print(i);
+        say i;
     }
 
     integer evens <- 0;
     for i from 0 until 20 step 2 {
         increment evens;
     }
-    print("even numbers below 20: ", evens);
+    say "even numbers below 20: ", evens;
 
     integer n <- 7;
     double n;
     n squared -> n;
     halve the n;
-    print("n is ", n);
+    say "n is ", n;
 }

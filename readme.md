@@ -14,10 +14,13 @@
 
 - Variables and data types
 - Arithmetic and logical expressions, with real operator precedence
-- Conditionals (`if`, `else if`, `otherwise`)
-- Loops: `while`, the classic `for`, and range loops (`for i from 1 to 10`, `down to`, `step`)
+- Conditionals (`if`, `else if`, `otherwise`) and spoken predicates (`is even`, `is between 1 and 10`)
+- Loops: `while`, the classic `for`, range loops (`for i from 1 to 10`, `down to`, `step`), and `repeat 5 times` / `repeat ... until`
 - In-place updates in both spellings: `n++` / `increment n`, `n += 3` / `add 3 to n`, `double n`
+- The voice forms: `say`, `ask`, `set ... to`, `let ... be`, `swap ... and ...`
+- `print` writes raw text - `'\n'` ends a line; `say` always ends the line
 - Functions, procedures, forward declarations, and recursion
+- `main { }` may also be spelled `program { }` or `code { }`
 - Input/Output operations
 
 ## Architecture Overview
@@ -48,8 +51,7 @@ Vox has **two engines** built from that one grammar:
 
 - **Java** (`src/`) - the reference implementation and CLI.
 - **TypeScript** (`core/`) - the same pipeline ported for the browser; it
-  powers the web demo. Its parser is generated from `Vox.g4` at build time and
-  is not committed.
+  powers the web demo.
 
 Both engines emit identical IR and pass the same regression suite. The one
 deliberate difference: TypeScript integers are **exact** (arbitrary precision),
@@ -59,19 +61,19 @@ wrapped one in Java.
 
 ## Components
 
-| Path | Purpose |
-| --- | --- |
-| `Vox.g4` | Grammar definition for the Vox language (shared by both engines) |
-| `src/VoxMain.java` | Java entry point (parse -> check -> lower -> run) |
-| `src/SemanticAnalyzer.java` | Name resolution and type checking |
-| `src/IRBuilder.java` | Converts the parse tree into IR instructions |
-| `src/IRExecutor.java` | Executes IR instructions on a custom runtime |
-| `core/` | TypeScript engine (`@vox/core`): same pipeline, browser-ready |
-| `core/src/cli.ts` | Node CLI mirroring the Java one, for testing parity |
-| `build.bat` / `build.sh` | Java build; produces `build/vox.jar` |
-| `vox.bat` | CLI launcher |
-| `tests/run.sh` | Regression suite (drives either engine) |
-| `tools/antlr-4.13.2-complete.jar` | ANTLR dependency |
+| Path                              | Purpose                                                          |
+| --------------------------------- | ---------------------------------------------------------------- |
+| `Vox.g4`                          | Grammar definition for the Vox language (shared by both engines) |
+| `src/VoxMain.java`                | Java entry point (parse -> check -> lower -> run)                |
+| `src/SemanticAnalyzer.java`       | Name resolution and type checking                                |
+| `src/IRBuilder.java`              | Converts the parse tree into IR instructions                     |
+| `src/IRExecutor.java`             | Executes IR instructions on a custom runtime                     |
+| `core/`                           | TypeScript engine (`@vox/core`): same pipeline, browser-ready    |
+| `core/src/cli.ts`                 | Node CLI mirroring the Java one, for testing parity              |
+| `build.bat` / `build.sh`          | Java build; produces `build/vox.jar`                             |
+| `vox.bat`                         | CLI launcher                                                     |
+| `tests/run.sh`                    | Regression suite (drives either engine)                          |
+| `tools/antlr-4.13.2-complete.jar` | ANTLR dependency                                                 |
 
 ## Installation & Setup
 
@@ -100,7 +102,7 @@ This generates the parser, compiles everything, and packages a self-contained
 ### 3. Put Vox on your PATH (optional)
 
 Add the project folder itself to your `PATH`. `vox.bat` locates its own jar, so
-no `VOX_HOME` variable is needed.
+no `additional variable is needed.
 
 ## Usage
 
@@ -110,10 +112,10 @@ vox <filename.vox>
 
 Options:
 
-| Option | Effect |
-| --- | --- |
-| `--emit-ir` | Print the generated IR |
-| `--check` | Parse and type-check only, do not run |
+| Option      | Effect                                               |
+| ----------- | ---------------------------------------------------- |
+| `--emit-ir` | Print the generated IR                               |
+| `--check`   | Parse and type-check only, do not run                |
 | `--steps N` | Change the execution step limit (default 50,000,000) |
 
 Exit codes: `0` success, `1` compile error, `2` runtime error, `64` bad usage.
@@ -136,30 +138,15 @@ node core/dist/cli.js examples/factorial.vox
 
 ### Web playground
 
-`web/` is a React + Vite + Tailwind site with three routes: `/` introduces the
-language, `/playground` runs it, and covers the language's purpose and
-its mascot. There is no backend: the TypeScript engine runs in a Web Worker, so
+`web/` is a React + Vite + Tailwind site. There is no backend: the TypeScript engine runs in a Web Worker, so
 a runaway program can be stopped without freezing the page, and `input()`
 prompts inline in the console. The editor runs the real compiler as you type
-and underlines syntax and semantic errors; the code, console and IR panes are
-resizable by dragging their dividers.
-
-`docs/portfolio/` holds the journal entry and project card for the author's
-portfolio site, kept in sync with the project.
+and underlines syntax and semantic errors.
 
 ```bash
 npm run dev            # builds core, then starts the dev server
 npm run build          # builds core, then web/dist (static, deploy anywhere)
 ```
-
-Deploying to Vercel: set the root directory to `web`. `web/vercel.json` does
-the rest: its `installCommand` installs a JDK (ANTLR needs Java to generate the
-parser, and Vercel's build image has none), `web`'s `prebuild` builds `core`
-first, and every route is rewritten to `index.html` for client-side routing.
-
-If Java cannot be installed in your build environment, the alternative is to
-generate the parser locally and commit `core/src/gen` (remove it from
-`.gitignore`); the generate step then skips itself wherever Java is missing.
 
 ## Tests
 
@@ -182,7 +169,7 @@ Runnable copies of these live in [examples/](examples/).
 integer hailstone(integer n) {
 
     while (n is greater than 1) {
-        print(n);
+        say n;
 
         if ((n % 2) == 0) {
             n = n divided by 2;
@@ -192,7 +179,7 @@ integer hailstone(integer n) {
         }
     }
 
-    print(1);
+    say 1;
     return n;
 
 }
@@ -222,7 +209,7 @@ main {
 
     consider an integer value which is equal to 6;
     integer answer <- factorial(value);
-    print(answer);
+    say answer;
 
 }
 ```
@@ -231,22 +218,23 @@ main {
 
 ### Operators, highest precedence first
 
-| Level | Operators |
-| --- | --- |
-| 1 | `( )` |
-| 2 | `as` (cast) |
-| 3 | `squared`, `cubed` |
-| 4 | spoken builtins: `square root of`, `length of`, ... |
-| 5 | `^` `**` / `to the power of` / `raised to the power of` (right associative) |
-| 6 | unary `-` |
-| 7 | `not` / `!` / `~` |
-| 8 | `*` `/` `%` / `multiplied by` / `times` / `divided by` / `remainder from` |
-| 9 | `+` `-` / `added to` / `plus` / `minus` |
-| 10 | `subtracted from` |
-| 11 | `<` `>` `<=` `>=` / `is less than` / `is greater than` / ... |
-| 12 | `==` `!=` / `is` / `is equal to` / `equals` / `equals to` / `is not` |
-| 13 | `&&` `&` / `and` |
-| 14 | `\|\|` `\|` / `or` |
+| Level | Operators                                                                                                              |
+| ----- | ---------------------------------------------------------------------------------------------------------------------- |
+| 1     | `( )`                                                                                                                  |
+| 2     | `as` (cast)                                                                                                            |
+| 3     | `squared`, `cubed`                                                                                                     |
+| 4     | spoken builtins: `square root of`, `length of`, ...                                                                    |
+| 5     | `^` `**` / `to the power of` / `raised to the power of` (right associative)                                            |
+| 6     | unary `-`                                                                                                              |
+| 7     | `not` / `!` / `~`                                                                                                      |
+| 8     | `*` `/` `%` / `multiplied by` / `times` / `divided by` / `remainder from`                                              |
+| 9     | `+` `-` / `added to` / `plus` / `minus`                                                                                |
+| 10    | `subtracted from`                                                                                                      |
+| 11    | predicates: `is even`, `is odd`, `is positive`, `is negative`, `is empty`, `is divisible by`, `is between ... and ...` |
+| 12    | `<` `>` `<=` `>=` / `is less than` / `is greater than` / ...                                                           |
+| 13    | `==` `!=` / `is` / `is equal to` / `equals` / `equals to` / `is not`                                                   |
+| 14    | `&&` `&` / `and`                                                                                                       |
+| 15    | `\|\|` `\|` / `or`                                                                                                     |
 
 `a subtracted from b` evaluates to `b - a`. Prefix and postfix forms apply to
 the term next to them: `-x squared` is `-(x squared)`, `2 * x squared` is
@@ -287,6 +275,72 @@ the empty string for `string` and `character`.
 `12.5` becomes a `float`, `true`/`false` become a `boolean`, anything else
 stays a `string`. It is accepted wherever a value is expected.
 
+### print, say and newlines
+
+`print` writes exactly what you give it - **no newline is added**. Print
+`'\n'` where a line should end. `say` is the spoken line-form: it prints its
+arguments and then ends the line for you.
+
+```java
+print("loading");
+print(".", ".", ".", '\n');   // loading...
+print("a"); print("b");       // ab - still the same line
+say "done";                   // done, newline included
+```
+
+String literals take either quote style (`"\n"` or `'\n'`); escapes are `\n`,
+`\t`, `\r`, `\"`, `\'` and `\\`.
+
+`ask` prints its prompt (no newline, so the answer lands on the same line) and
+reads one line back, coerced exactly like `input()`:
+
+```java
+integer age <- ask "How old are you? ";
+let name be ask "Who is this? ";
+```
+
+`ask` applies to the term right after it; parenthesise a longer prompt:
+`ask ("Hello " + name + ", how old?")`.
+
+### Spoken assignment: set, let and swap
+
+`set total to 0;` is assignment, exactly as taught. `let x be 5;` declares a
+new variable and infers its type from the value (`let line be an input;` stays
+dynamic). `swap a and b;` exchanges two variables through a hidden temporary.
+
+```java
+let price be 12.5;            // float, inferred
+set the price to price * 2;
+swap price and limit;
+```
+
+`x is equal to 5;` on its own is a comparison, not an assignment; the compiler
+warns that it has no effect and points you at `set`.
+
+### Predicates
+
+Conditions can be spoken, and `is not` negates every predicate:
+
+| Predicate                        | Meaning                |
+| -------------------------------- | ---------------------- |
+| `n is even`, `n is odd`          | parity, integers only  |
+| `x is positive`, `x is negative` | sign of any number     |
+| `n is divisible by k`            | `n % k == 0`           |
+| `x is between a and b`           | inclusive on both ends |
+| `s is empty`                     | the string is `""`     |
+
+```java
+if (year is divisible by 4 and year is not divisible by 100) { ... }
+if (guess is between 1 and 100) { ... }
+```
+
+### Repeat loops
+
+`repeat 5 times { ... }` runs a block a fixed number of times without naming a
+counter; the count is any integer expression, evaluated once.
+`repeat { ... } until (done)` runs the body at least once and stops when the
+condition becomes true. `stop;` and `skip;` work inside both.
+
 ### Negation, casts and builtins
 
 Unary minus works on any number: `-x`, `-(a + b)`, `2 ^ -1`. It binds looser
@@ -303,15 +357,15 @@ string label <- 5 as string + "!";     // "5!"
 Builtin functions have a spoken and a symbolic form; a user-defined function
 with the same name takes precedence:
 
-| Spoken | Symbolic | Result |
-| --- | --- | --- |
-| `square root of x` | `sqrt(x)` | float |
-| `absolute value of x` | `abs(x)` | same type as `x` |
-| `floor of x`, `ceiling of x` | `floor(x)`, `ceiling(x)` | integer |
-| - | `round(x)` | integer |
-| - | `min(a, b)`, `max(a, b)` | float if either is a float |
-| `length of s` | `length(s)` | integer |
-| `uppercase of s`, `lowercase of s` | `uppercase(s)`, `lowercase(s)` | string |
+| Spoken                             | Symbolic                       | Result                     |
+| ---------------------------------- | ------------------------------ | -------------------------- |
+| `square root of x`                 | `sqrt(x)`                      | float                      |
+| `absolute value of x`              | `abs(x)`                       | same type as `x`           |
+| `floor of x`, `ceiling of x`       | `floor(x)`, `ceiling(x)`       | integer                    |
+| -                                  | `round(x)`                     | integer                    |
+| -                                  | `min(a, b)`, `max(a, b)`       | float if either is a float |
+| `length of s`                      | `length(s)`                    | integer                    |
+| `uppercase of s`, `lowercase of s` | `uppercase(s)`, `lowercase(s)` | string                     |
 
 Spoken builtins apply to the term right after them: `length of s + 1` is
 `length(s) + 1`.
@@ -329,18 +383,18 @@ expressions: `i++` has no value, so `x <- i++` is a syntax error rather than a
 trap. Every spoken form lowers to the same single IR instruction as its
 symbolic twin.
 
-| Symbolic | Spoken |
-| --- | --- |
-| `n++;` / `++n;` | `increment n;`, `increment the n;`, `n is incremented;` |
-| `n--;` / `--n;` | `decrement n;`, `decrement the n;`, `n is decremented;` |
-| `n += x;` | `increase n by x;`, `add x to n;`, `x is added to n;` |
-| `n -= x;` | `decrease n by x;`, `subtract x from n;`, `take x from n;`, `remove x from n;`, `x is subtracted from n;` |
-| `n *= x;` | `multiply n by x;` |
-| `n /= x;` | `divide n by x;` |
-| `n %= x;` | - |
-| `n ^= x;` / `n **= x;` | - |
-| `n *= 2;` | `double n;`, `n is doubled;` |
-| `n /= 2;` | `halve n;`, `n is halved;` |
+| Symbolic               | Spoken                                                                                                    |
+| ---------------------- | --------------------------------------------------------------------------------------------------------- |
+| `n++;` / `++n;`        | `increment n;`, `increment the n;`, `n is incremented;`                                                   |
+| `n--;` / `--n;`        | `decrement n;`, `decrement the n;`, `n is decremented;`                                                   |
+| `n += x;`              | `increase n by x;`, `add x to n;`, `x is added to n;`                                                     |
+| `n -= x;`              | `decrease n by x;`, `subtract x from n;`, `take x from n;`, `remove x from n;`, `x is subtracted from n;` |
+| `n *= x;`              | `multiply n by x;`                                                                                        |
+| `n /= x;`              | `divide n by x;`                                                                                          |
+| `n %= x;`              | -                                                                                                         |
+| `n ^= x;` / `n **= x;` | -                                                                                                         |
+| `n *= 2;`              | `double n;`, `n is doubled;`                                                                              |
+| `n /= 2;`              | `halve n;`, `n is halved;`                                                                                |
 
 `the` is optional after every verb (`add 3 to the total`). An update is
 type-checked exactly like the assignment it stands for: `s += "!"` concatenates
@@ -348,9 +402,10 @@ when `s` is a string, `halve n` on an integer is integer division, and
 `increment name` on a string is a compile error. The classic `for` loop takes
 an update as its third clause: `for (integer i <- 1; i <= 5; i++)`.
 
-The verbs and the range-loop words (`add`, `double`, `to`, `from`, `by`,
-`the`, `step`, `until`, ...) are keywords, so they cannot name a variable or a
-function.
+The verbs, the range-loop words and the voice words (`add`, `double`, `to`,
+`from`, `by`, `the`, `step`, `until`, `say`, `ask`, `set`, `let`, `be`,
+`swap`, `repeat`, `even`, `odd`, ...) are keywords, so they cannot name a
+variable or a function.
 
 ### Range loops
 
@@ -383,6 +438,6 @@ where a value is expected is a compile error.
 
 ```java
 procedure greet(string who) {
-    print("hello, ", who);
+    say "hello, ", who;
 }
 ```

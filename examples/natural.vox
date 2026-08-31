@@ -5,20 +5,20 @@ main {
     suppose an integer bonus which equals 3;
 
     integer total <- score added to bonus;
-    print("total: ", total);
+    say "total: ", total;
 
     // Multi-word operators may wrap across lines.
     if (total is greater
         than 15) {
-        print("that is a good score");
+        say "that is a good score";
     } else {
-        print("keep trying");
+        say "keep trying";
     }
 
     integer doubled <- total multiplied by 2;
     integer half <- doubled divided by 4;
-    print("half: ", half);
+    say "half: ", half;
 
     integer taken <- 5 subtracted from total;
-    print("after taking 5: ", taken);
+    say "after taking 5: ", taken;
 }
