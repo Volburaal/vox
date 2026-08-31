@@ -6,6 +6,7 @@ import factorial from '../../examples/factorial.vox?raw';
 import fibonacci from '../../examples/fibonacci.vox?raw';
 import natural from '../../examples/natural.vox?raw';
 import counting from '../../examples/counting.vox?raw';
+import voice from '../../examples/voice.vox?raw';
 
 export interface Example {
   id: string;
@@ -26,6 +27,12 @@ export const EXAMPLES: Example[] = [
     name: 'Natural syntax',
     blurb: 'Every spelling Vox accepts, in one program.',
     source: natural,
+  },
+  {
+    id: 'voice',
+    name: 'Voice',
+    blurb: 'say, ask, predicates and repeat - the radio host in action.',
+    source: voice,
   },
   {
     id: 'counting',

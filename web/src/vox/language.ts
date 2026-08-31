@@ -36,13 +36,17 @@ export const PHRASES = [
 ].sort((a, b) => b.length - a.length);
 
 const KEYWORDS = new Set([
-  'main', 'if', 'else', 'otherwise', 'while', 'for', 'action', 'print', 'input', 'return',
+  'main', 'program', 'code', 'if', 'else', 'otherwise', 'while', 'for', 'action',
+  'print', 'say', 'input', 'ask', 'return',
   'break', 'stop', 'continue', 'skip', 'void', 'nothing', 'procedure', 'as',
   // range loops
   'from', 'to', 'until', 'step', 'by', 'the',
   // in-place updates
   'increment', 'decrement', 'increase', 'decrease', 'add', 'subtract', 'take',
   'remove', 'multiply', 'divide', 'double', 'halve',
+  // voice and textbook forms
+  'set', 'let', 'be', 'swap', 'repeat',
+  'even', 'odd', 'positive', 'negative', 'empty', 'divisible', 'between',
 ]);
 const TYPES = new Set(['int', 'integer', 'number', 'float', 'bool', 'boolean', 'character', 'char', 'string', 'varchar']);
 const WORD_OPERATORS = new Set([

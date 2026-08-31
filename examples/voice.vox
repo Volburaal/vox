@@ -1,0 +1,21 @@
+// The voice of Vox: say, ask, and sentences that answer back.
+main {
+    say "Good evening, listeners. I am Vox.";
+    let name be ask "Who is on the line?";
+    say "Welcome to the show, ", name, "!";
+
+    let age be ask "And how old are you?";
+    if (age is between 13 and 19) {
+        say "A teenager! The best years for bad music.";
+    } otherwise if (age is not positive) {
+        say "That does not sound like an age to me.";
+    } otherwise if (age is even) {
+        say "An even ", age, ". Very tidy.";
+    } otherwise {
+        say "Odd. In the best way.";
+    }
+
+    repeat 3 times {
+        say "Stay tuned...";
+    }
+}
