@@ -4,23 +4,23 @@ main {
     say x;
     let f be 2.5;
     set the f to f * 2;
-    print(f);
+    print(f, '\n');
     let s be "vox";
     set s to s + "!";
-    print(s);
+    print(s, '\n');
     let flag be true;
-    print(flag);
+    print(flag, '\n');
 
     integer a <- 1;
     integer b <- 2;
     swap a and b;
-    print(a, " ", b);
+    print(a, " ", b, '\n');
     string u <- "up";
     string d <- "down";
     swap u and d;
-    print(u, " ", d);
+    print(u, " ", d, '\n');
 
     for (let i be 1; i <= 3; i++) {
-        print(i);
+        print(i, '\n');
     }
 }

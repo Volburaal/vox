@@ -1,20 +1,20 @@
 main {
     integer n <- 12;
-    print(n is even);
-    print(n is odd);
-    print(n is not even);
-    print(n is divisible by 3);
-    print(n is not divisible by 5);
-    print(n is between 10 and 20);
-    print(n is not between 1 and 5);
-    print(-n is negative);
-    print(0 is positive);
-    print(0.5 is positive);
-    print(2 + 1 is odd);
+    print(n is even, '\n');
+    print(n is odd, '\n');
+    print(n is not even, '\n');
+    print(n is divisible by 3, '\n');
+    print(n is not divisible by 5, '\n');
+    print(n is between 10 and 20, '\n');
+    print(n is not between 1 and 5, '\n');
+    print(-n is negative, '\n');
+    print(0 is positive, '\n');
+    print(0.5 is positive, '\n');
+    print(2 + 1 is odd, '\n');
     string s <- "";
-    print(s is empty);
+    print(s is empty, '\n');
     set s to "x";
-    print(s is not empty);
+    print(s is not empty, '\n');
     if (n is even and n is divisible by 4) {
         say "twelve works";
     }

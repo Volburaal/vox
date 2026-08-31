@@ -1,12 +1,12 @@
 main {
-    print(-5);
+    print(-5, '\n');
     integer x <- 3;
-    print(-x);
-    print(-x + 10);
-    print(-2 ^ 2);
-    print(2 ^ -1);
+    print(-x, '\n');
+    print(-x + 10, '\n');
+    print(-2 ^ 2, '\n');
+    print(2 ^ -1, '\n');
     float f <- -1.5;
-    print(-f);
-    print(10 - -3);
-    print(-(x * 2));
+    print(-f, '\n');
+    print(10 - -3, '\n');
+    print(-(x * 2), '\n');
 }

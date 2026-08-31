@@ -1,9 +1,9 @@
 procedure greet(string who) {
-    print("hello, ", who);
+    print("hello, ", who, '\n');
 }
 nothing countdown(integer n) {
     while (n > 0) {
-        print(n);
+        print(n, '\n');
         n <- n - 1;
     }
     return;
@@ -13,5 +13,5 @@ main {
     greet("vox");
     countdown(3);
     nop();
-    print("done");
+    print("done", '\n');
 }

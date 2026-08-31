@@ -1,0 +1,12 @@
+// print writes raw text: lines happen only where the program prints '\n'.
+main {
+    print("a");
+    print("b", "c");
+    print('\n');
+    print("one\ntwo", '\n');
+    print(1, ' ', 2, '\n');
+    say "spoken line";
+    print('single ', "double", '\n');
+    print("quote: '", '\n');
+    print('quote: "', '\n');
+}

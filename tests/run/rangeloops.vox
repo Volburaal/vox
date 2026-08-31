@@ -3,42 +3,42 @@ main {
     for i from 1 to 5 {
         sum += i;
     }
-    print(sum);
+    print(sum, '\n');
 
     for (integer i from 10 down to 7) {
-        print(i);
+        print(i, '\n');
     }
 
     for i from 0 until 3 {
-        print(i);
+        print(i, '\n');
     }
 
     for i from 0 to 10 step 5 {
-        print(i);
+        print(i, '\n');
     }
 
     for i from 1 to 10 in steps of 4 {
-        print(i);
+        print(i, '\n');
     }
 
     for i from 9 down to 1 by 4 {
-        print(i);
+        print(i, '\n');
     }
 
     // The bound is fixed before the first iteration.
     integer n <- 3;
     for i from 1 to n {
         n <- 100;
-        print(i);
+        print(i, '\n');
     }
 
     for float x from 0.0 to 1.0 step 0.5 {
-        print(x);
+        print(x, '\n');
     }
 
     // An empty range runs zero times.
     for i from 5 to 1 {
-        print("never");
+        print("never", '\n');
     }
 
     integer count <- 0;
@@ -47,16 +47,16 @@ main {
         if (i > 9) { stop; }
         count++;
     }
-    print(count);
+    print(count, '\n');
 
     for i from 1 to 3 {
         for j from 1 to 2 {
-            print(i, "-", j);
+            print(i, "-", j, '\n');
         }
     }
     // Bounds see the outer variable, even when the loop reuses its name.
     integer i <- 7;
     for i from 1 to i + 2 {
-        print(i);
+        print(i, '\n');
     }
 }

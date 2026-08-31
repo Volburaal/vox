@@ -6,14 +6,14 @@ main {
     increment n;
     increment the n;
     n is incremented;
-    print(n);
+    print(n, '\n');
 
     n--;
     --n;
     decrement n;
     decrement the n;
     n is decremented;
-    print(n);
+    print(n, '\n');
 
     n += 5;
     n -= 3;
@@ -22,7 +22,7 @@ main {
     n %= 4;
     n ^= 3;
     n **= 2;
-    print(n);
+    print(n, '\n');
 
     increase n by 6;
     decrease the n by 10;
@@ -38,25 +38,25 @@ main {
     n is doubled;
     halve n;
     n is halved;
-    print(n);
+    print(n, '\n');
 
     float f <- 1.5;
     double f;
     f += 0.25;
-    print(f);
+    print(f, '\n');
 
     string s <- "vox";
     s += "!";
     add "?" to s;
-    print(s);
+    print(s, '\n');
 
     integer sum <- 0;
     for (integer i <- 1; i <= 4; i++) {
         sum += i;
     }
-    print(sum);
+    print(sum, '\n');
     for (integer j <- 4; j > 0; decrement j) {
         sum -= 1;
     }
-    print(sum);
+    print(sum, '\n');
 }

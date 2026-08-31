@@ -5,10 +5,10 @@ integer grade(integer s) {
     otherwise { return 1; }
 }
 main {
-    print(grade(95));
-    print(grade(85));
-    print(grade(75));
-    print(grade(10));
+    print(grade(95), '\n');
+    print(grade(85), '\n');
+    print(grade(75), '\n');
+    print(grade(10), '\n');
     integer n <- 7;
     if (n == 1) { print("one"); }
     else if (n == 7) { print("seven"); }

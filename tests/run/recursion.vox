@@ -7,6 +7,6 @@ integer fib(integer n) {
     return fib(n - 1) + fib(n - 2);
 }
 main {
-    print(fact(10));
-    print(fib(15));
+    print(fact(10), '\n');
+    print(fib(15), '\n');
 }

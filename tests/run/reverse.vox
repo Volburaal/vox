@@ -1,8 +1,8 @@
 main {
     5 -> integer v;
-    print(v);
+    print(v, '\n');
     12 -> v;
-    print(v);
+    print(v, '\n');
     v multiplied by 2 -> integer w;
-    print(w);
+    print(w, '\n');
 }

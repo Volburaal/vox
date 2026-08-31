@@ -3,11 +3,11 @@ main {
     for (integer i <- 1; i <= 5; i <- i + 1) {
         sum <- sum + i;
     }
-    print(sum);
+    print(sum, '\n');
 
     integer c <- 3;
     while (c > 0) {
-        print(c);
+        print(c, '\n');
         c <- c - 1;
     }
 }

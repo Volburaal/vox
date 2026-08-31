@@ -3,7 +3,7 @@ main {
     repeat 5 times {
         increment c;
     }
-    print(c);
+    print(c, '\n');
 
     repeat c - 3 times {
         say "hi";
@@ -13,7 +13,7 @@ main {
     repeat {
         n *= 2;
     } until (n > 20);
-    print(n);
+    print(n, '\n');
 
     repeat 0 times {
         say "never";
@@ -27,7 +27,7 @@ main {
         k++;
         if (k == 4) { stop; }
     }
-    print(k);
+    print(k, '\n');
 
     integer evens <- 0;
     integer i <- 0;
@@ -36,5 +36,5 @@ main {
         if (i % 2 == 1) { skip; }
         evens++;
     } until (i >= 10);
-    print(evens);
+    print(evens, '\n');
 }

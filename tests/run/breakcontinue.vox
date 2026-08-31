@@ -4,26 +4,26 @@ main {
         i <- i + 1;
         if (i == 5) { stop; }
     }
-    print(i);
+    print(i, '\n');
 
     integer sum <- 0;
     for (integer j <- 1; j <= 10; j <- j + 1) {
         if (j % 2 == 0) { skip; }
         sum <- sum + j;
     }
-    print(sum);
+    print(sum, '\n');
 
     integer k <- 0;
     for (integer m <- 0; m < 100; m <- m + 1) {
         k <- m;
         if (m == 3) { break; }
     }
-    print(k);
+    print(k, '\n');
 
     integer n <- 0;
     while (n < 10) {
         n <- n + 1;
         if (n < 8) { continue; }
-        print(n);
+        print(n, '\n');
     }
 }

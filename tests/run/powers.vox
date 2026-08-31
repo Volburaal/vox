@@ -1,17 +1,17 @@
 main {
     integer x <- 3;
-    print(x ** 2);
-    print(x squared);
-    print(x cubed);
-    print(2 raised to the power of 10);
-    print(2 ** 3 ** 2);
-    print(-x squared);
-    print((-x) squared);
-    print(x squared + x cubed);
-    print(2 * x squared);
-    print(x squared squared);
-    print(1.5 squared);
-    print(square root of x squared);
+    print(x ** 2, '\n');
+    print(x squared, '\n');
+    print(x cubed, '\n');
+    print(2 raised to the power of 10, '\n');
+    print(2 ** 3 ** 2, '\n');
+    print(-x squared, '\n');
+    print((-x) squared, '\n');
+    print(x squared + x cubed, '\n');
+    print(2 * x squared, '\n');
+    print(x squared squared, '\n');
+    print(1.5 squared, '\n');
+    print(square root of x squared, '\n');
     integer y <- x ** 2 + 1;
-    print(y);
+    print(y, '\n');
 }

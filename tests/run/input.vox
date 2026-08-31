@@ -2,7 +2,7 @@ main {
     integer n <- input();
     string who <- input();
     boolean flag <- input();
-    print("n doubled: ", n multiplied by 2);
-    print("hello ", who);
-    print("flag: ", flag);
+    print("n doubled: ", n multiplied by 2, '\n');
+    print("hello ", who, '\n');
+    print("flag: ", flag, '\n');
 }

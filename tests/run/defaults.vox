@@ -3,8 +3,8 @@ main {
     float b;
     boolean c;
     string d;
-    print(a);
-    print(b);
-    print(c);
-    print(d);
+    print(a, '\n');
+    print(b, '\n');
+    print(c, '\n');
+    print(d, '\n');
 }

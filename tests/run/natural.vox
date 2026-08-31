@@ -1,15 +1,15 @@
 main {
     let there be a whole number a which is equal to 10;
     suppose an integer b which equals 4;
-    print(a added to b);
-    print(a minus b);
-    print(a multiplied by b);
-    print(a divided by b);
-    print(b subtracted from a);
-    print(a is greater than b);
+    print(a added to b, '\n');
+    print(a minus b, '\n');
+    print(a multiplied by b, '\n');
+    print(a divided by b, '\n');
+    print(b subtracted from a, '\n');
+    print(a is greater than b, '\n');
     print(a
          is less than
-         b);
-    print(a to the power of 2);
-    print(a remainder from 3);
+         b, '\n');
+    print(a to the power of 2, '\n');
+    print(a remainder from 3, '\n');
 }

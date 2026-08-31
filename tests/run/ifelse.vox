@@ -1,10 +1,10 @@
 main {
     integer n <- 4;
-    if (n > 2) { print("a"); print("b"); print("c"); }
-    else { print("z"); }
+    if (n > 2) { say "a"; say "b"; say "c"; }
+    else { say "z"; }
 
-    if (n < 2) { print("x"); }
-    else { print("y1"); print("y2"); }
+    if (n < 2) { say "x"; }
+    else { say "y1"; say "y2"; }
 
-    if (n == 4) { print("plain-if"); }
+    if (n == 4) { say "plain-if"; }
 }
