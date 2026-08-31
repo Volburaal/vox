@@ -1,0 +1,40 @@
+main {
+    integer c <- 0;
+    repeat 5 times {
+        increment c;
+    }
+    print(c);
+
+    repeat c - 3 times {
+        say "hi";
+    }
+
+    integer n <- 1;
+    repeat {
+        n *= 2;
+    } until (n > 20);
+    print(n);
+
+    repeat 0 times {
+        say "never";
+    }
+    repeat {
+        say "once";
+    } until (true);
+
+    integer k <- 0;
+    repeat 10 times {
+        k++;
+        if (k == 4) { stop; }
+    }
+    print(k);
+
+    integer evens <- 0;
+    integer i <- 0;
+    repeat {
+        i++;
+        if (i % 2 == 1) { skip; }
+        evens++;
+    } until (i >= 10);
+    print(evens);
+}

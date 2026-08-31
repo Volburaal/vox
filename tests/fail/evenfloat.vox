@@ -1,0 +1,4 @@
+main {
+    float f <- 1.5;
+    print(f is even);
+}

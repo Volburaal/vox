@@ -1,0 +1,26 @@
+main {
+    let x be 5;
+    set x to x + 2;
+    say x;
+    let f be 2.5;
+    set the f to f * 2;
+    print(f);
+    let s be "vox";
+    set s to s + "!";
+    print(s);
+    let flag be true;
+    print(flag);
+
+    integer a <- 1;
+    integer b <- 2;
+    swap a and b;
+    print(a, " ", b);
+    string u <- "up";
+    string d <- "down";
+    swap u and d;
+    print(u, " ", d);
+
+    for (let i be 1; i <= 3; i++) {
+        print(i);
+    }
+}

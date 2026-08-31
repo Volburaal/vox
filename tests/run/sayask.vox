@@ -1,0 +1,8 @@
+main {
+    say "hello";
+    say "sum: ", 2 + 3;
+    integer age <- ask "how old?";
+    say age + 1;
+    let name be ask "name?";
+    say "hi ", name;
+}
