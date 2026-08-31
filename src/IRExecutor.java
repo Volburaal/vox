@@ -11,7 +11,7 @@ import java.util.*;
  *   param <index> <name>           binds incoming argument #index to <name>
  *   set <var> <operand>
  *   input <dest>
- *   print <operand>...
+ *   print <operand>...            writes the operands; no newline is added
  *   not|neg <dest> <operand>
  *   add|sub|mul|div|mod|power <dest> <left> <right>
  *   eq|ne|lt|gt|le|ge <dest> <left> <right>
@@ -39,7 +39,7 @@ public class IRExecutor {
         public VoxRuntimeError(String message) { super(message); }
     }
 
-    public interface Sink   { void writeLine(String text); }
+    public interface Sink   { void write(String text); }
     public interface Source { String readLine(); }
 
     private static final long DEFAULT_STEP_LIMIT = 50_000_000L;
@@ -48,7 +48,8 @@ public class IRExecutor {
     private final Map<String, Integer> labelToIndex = new HashMap<>();
     private final Map<String, Integer> functionToIndex = new HashMap<>();
 
-    private Sink output = System.out::println;
+    // print adds no newline, so flush per write to keep prompts visible.
+    private Sink output = text -> { System.out.print(text); System.out.flush(); };
     private Source input = new Source() {
         private BufferedReader reader;
         @Override public String readLine() {
@@ -161,7 +162,7 @@ public class IRExecutor {
                 case "print": {
                     StringBuilder sb = new StringBuilder();
                     for (int i = 1; i < toks.length; i++) sb.append(display(resolve(toks[i])));
-                    output.writeLine(sb.toString());
+                    output.write(sb.toString());
                     pc++;
                     break;
                 }

@@ -41,7 +41,7 @@ const DEFAULT_STEP_LIMIT = 50_000_000;
  *   param <index> <name>           binds incoming argument #index to <name>
  *   set <var> <operand>
  *   input <dest>
- *   print <operand>...
+ *   print <operand>...            writes the operands; no newline is added
  *   not|neg <dest> <operand>
  *   add|sub|mul|div|mod|power <dest> <left> <right>
  *   eq|ne|lt|gt|le|ge <dest> <left> <right>
@@ -55,8 +55,9 @@ const DEFAULT_STEP_LIMIT = 50_000_000;
  *   return [operand]
  */
 export class IRExecutor {
-    /** Receives each line the program prints. */
-    onOutput: (line: string) => void = () => {};
+    /** Receives each chunk the program prints. No newline is added: text is
+     *  raw, and lines exist only where the program printed "\n". */
+    onOutput: (chunk: string) => void = () => {};
 
     private readonly instructions: string[];
     private readonly labelToIndex = new Map<string, number>();

@@ -329,11 +329,16 @@ export class IRBuilder extends VoxVisitor<string | null> {
         return null;
     };
 
+    /**
+     * `print` writes exactly its arguments - no newline. `say` is the
+     * line-form: it appends a "\n" operand, so both stay one IR instruction.
+     */
     visitPrintStatement = (ctx: PrintStatementContext): null => {
         let line = 'print';
         for (const e of ctx.expression_list()) {
             line += ' ' + this.visit(e);
         }
+        if (ctx.SAY()) line += ' "\\n"';
         this.emit(line);
         return null;
     };
@@ -533,7 +538,22 @@ export class IRBuilder extends VoxVisitor<string | null> {
     visitIntExpr = (ctx: IntExprContext): string => ctx.getText();
     visitFloatExpr = (ctx: FloatExprContext): string => ctx.getText();
     visitBoolExpr = (ctx: BoolExprContext): string => ctx.getText();
-    visitStringExpr = (ctx: StringExprContext): string => ctx.getText();
+    visitStringExpr = (ctx: StringExprContext): string => normalizeString(ctx.getText());
+}
+
+/**
+ * The IR spells every string double-quoted, so a single-quoted source literal
+ * is re-emitted with double quotes (escaping any it contains).
+ */
+function normalizeString(text: string): string {
+    if (text.startsWith('"')) return text;
+    let out = '"';
+    for (let i = 1; i < text.length - 1; i++) {
+        const c = text[i];
+        if (c === '\\') { out += c + text[++i]; continue; }
+        out += c === '"' ? '\\"' : c;
+    }
+    return out + '"';
 }
 
 function defaultValue(datatype: string): string {

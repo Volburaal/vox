@@ -77,7 +77,7 @@ async function main(): Promise<void> {
     if (checkOnly) return;
 
     const executor = new IRExecutor(ir, stepLimit > 0 ? { stepLimit } : undefined);
-    executor.onOutput = line => process.stdout.write(line + '\n');
+    executor.onOutput = chunk => process.stdout.write(chunk);
 
     // Lines are read from stdin only when the program actually asks for one,
     // matching the Java CLI's lazy reader.

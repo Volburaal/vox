@@ -386,12 +386,17 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         return null;
     }
 
+    /**
+     * `print` writes exactly its arguments - no newline. `say` is the
+     * line-form: it appends a "\n" operand, so both stay one IR instruction.
+     */
     @Override
     public String visitPrintStatement(VoxParser.PrintStatementContext ctx) {
         StringBuilder sb = new StringBuilder("print");
         for (VoxParser.ExpressionContext e : ctx.expression()) {
             sb.append(' ').append(visit(e));
         }
+        if (ctx.SAY() != null) sb.append(" \"\\n\"");
         emit(sb.toString());
         return null;
     }
@@ -628,5 +633,21 @@ public class IRBuilder extends VoxBaseVisitor<String> {
     @Override public String visitIntExpr(VoxParser.IntExprContext ctx)       { return ctx.getText(); }
     @Override public String visitFloatExpr(VoxParser.FloatExprContext ctx)   { return ctx.getText(); }
     @Override public String visitBoolExpr(VoxParser.BoolExprContext ctx)     { return ctx.getText(); }
-    @Override public String visitStringExpr(VoxParser.StringExprContext ctx) { return ctx.getText(); }
+    @Override public String visitStringExpr(VoxParser.StringExprContext ctx) { return normalizeString(ctx.getText()); }
+
+    /**
+     * The IR spells every string double-quoted, so a single-quoted source
+     * literal is re-emitted with double quotes (escaping any it contains).
+     */
+    private static String normalizeString(String text) {
+        if (text.startsWith("\"")) return text;
+        StringBuilder out = new StringBuilder("\"");
+        for (int i = 1; i < text.length() - 1; i++) {
+            char c = text.charAt(i);
+            if (c == '\\') { out.append(c).append(text.charAt(++i)); continue; }
+            if (c == '"') { out.append("\\\""); continue; }
+            out.append(c);
+        }
+        return out.append('"').toString();
+    }
 }

@@ -266,7 +266,10 @@ DATATYPE_STRING : 'string' | 'character' S 'string' | 'varchar' ;
 BOOL   : 'true' | 'false' ;
 FLOAT  : [0-9]+ '.' [0-9]+ ;
 INT    : [0-9]+ ;
-STRING : '"' (~["\\\r\n] | '\\' .)* '"' ;
+// Either quote style; escapes: \n \t \r \" \' \\
+STRING : '"' (~["\\\r\n] | '\\' .)* '"'
+       | '\'' (~['\\\r\n] | '\\' .)* '\''
+       ;
 ID     : [a-zA-Z_][a-zA-Z_0-9]* ;
 
 LINE_COMMENT  : '//' ~[\r\n]* -> skip ;
