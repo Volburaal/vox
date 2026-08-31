@@ -101,6 +101,12 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         return null;
     }
 
+    @Override
+    public String visitDeclLet(VoxParser.DeclLetContext ctx) {
+        emit("set " + ctx.ID().getText() + " " + visit(ctx.expression()));
+        return null;
+    }
+
     private static String defaultValue(String datatype) {
         switch (SemanticAnalyzer.canonical(datatype)) {
             case "integer":   return "0";
@@ -120,6 +126,12 @@ public class IRBuilder extends VoxBaseVisitor<String> {
 
     @Override
     public String visitAssignReverse(VoxParser.AssignReverseContext ctx) {
+        emit("set " + ctx.ID().getText() + " " + visit(ctx.expression()));
+        return null;
+    }
+
+    @Override
+    public String visitSetTo(VoxParser.SetToContext ctx) {
         emit("set " + ctx.ID().getText() + " " + visit(ctx.expression()));
         return null;
     }
@@ -194,6 +206,18 @@ public class IRBuilder extends VoxBaseVisitor<String> {
 
     private String update(String op, String name, String operand) {
         emit(op + " " + name + " " + name + " " + operand);
+        return null;
+    }
+
+    /** Swap through a temporary: three moves, no arithmetic. */
+    @Override
+    public String visitSwapStmt(VoxParser.SwapStmtContext ctx) {
+        String a = ctx.ID(0).getText();
+        String b = ctx.ID(1).getText();
+        String t = newTemp();
+        emit("set " + t + " " + a);
+        emit("set " + a + " " + b);
+        emit("set " + b + " " + t);
         return null;
     }
 
@@ -309,6 +333,45 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         String copy = newTemp();
         emit("set " + copy + " " + value);
         return copy;
+    }
+
+    /** `repeat n times` counts a hidden temporary down from n to 1. */
+    @Override
+    public String visitRepeatTimes(VoxParser.RepeatTimesContext ctx) {
+        String start = newLabel("repeat");
+        String end = newLabel("endrepeat");
+        String cont = newLabel("repcont");
+        String counter = newTemp();
+        emit("set " + counter + " " + visit(ctx.expression()));
+        emit("label " + start);
+        String cond = newTemp();
+        emit("gt " + cond + " " + counter + " 0");
+        emit("if_false " + cond + " goto " + end);
+        loops.push(new LoopLabels(end, cont));
+        visit(ctx.block());
+        loops.pop();
+        emit("label " + cont);
+        emit("sub " + counter + " " + counter + " 1");
+        emit("goto " + start);
+        emit("label " + end);
+        return null;
+    }
+
+    /** `repeat { } until (c)`: the body runs, then c decides whether to loop back. */
+    @Override
+    public String visitRepeatUntil(VoxParser.RepeatUntilContext ctx) {
+        String start = newLabel("repeat");
+        String end = newLabel("endrepeat");
+        String cont = newLabel("repcont");
+        emit("label " + start);
+        loops.push(new LoopLabels(end, cont));
+        visit(ctx.block());
+        loops.pop();
+        emit("label " + cont);
+        String cond = visit(ctx.expression());
+        emit("if_false " + cond + " goto " + start);
+        emit("label " + end);
+        return null;
     }
 
     @Override
@@ -428,6 +491,60 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         return dest;
     }
 
+    // ---- predicates lower to the comparisons they abbreviate; `is not` flips the test.
+
+    @Override
+    public String visitPredicateExpr(VoxParser.PredicateExprContext ctx) {
+        String value = visit(ctx.expression());
+        boolean negated = ctx.op.getType() == VoxParser.NE;
+        int pred = ctx.pred.getType();
+        if (pred == VoxParser.EVEN || pred == VoxParser.ODD) {
+            boolean wantZero = (pred == VoxParser.EVEN) != negated;
+            String m = newTemp();
+            emit("mod " + m + " " + value + " 2");
+            String dest = newTemp();
+            emit((wantZero ? "eq" : "ne") + " " + dest + " " + m + " 0");
+            return dest;
+        }
+        String dest = newTemp();
+        if (pred == VoxParser.POSITIVE) {
+            emit((negated ? "le" : "gt") + " " + dest + " " + value + " 0");
+        } else if (pred == VoxParser.NEGATIVE) {
+            emit((negated ? "ge" : "lt") + " " + dest + " " + value + " 0");
+        } else { // EMPTY
+            emit((negated ? "ne" : "eq") + " " + dest + " " + value + " \"\"");
+        }
+        return dest;
+    }
+
+    @Override
+    public String visitDivisibleExpr(VoxParser.DivisibleExprContext ctx) {
+        String value = visit(ctx.expression(0));
+        String divisor = visit(ctx.expression(1));
+        String m = newTemp();
+        emit("mod " + m + " " + value + " " + divisor);
+        String dest = newTemp();
+        emit((ctx.op.getType() == VoxParser.NE ? "ne" : "eq") + " " + dest + " " + m + " 0");
+        return dest;
+    }
+
+    @Override
+    public String visitBetweenExpr(VoxParser.BetweenExprContext ctx) {
+        String value = visit(ctx.expression(0));
+        String low = visit(ctx.low);
+        String high = visit(ctx.high);
+        String aboveLow = newTemp();
+        emit("ge " + aboveLow + " " + value + " " + low);
+        String belowHigh = newTemp();
+        emit("le " + belowHigh + " " + value + " " + high);
+        String dest = newTemp();
+        emit("and " + dest + " " + aboveLow + " " + belowHigh);
+        if (ctx.op.getType() != VoxParser.NE) return dest;
+        String inverted = newTemp();
+        emit("not " + inverted + " " + dest);
+        return inverted;
+    }
+
     @Override
     public String visitRelExpr(VoxParser.RelExprContext ctx) {
         String op;
@@ -493,6 +610,15 @@ public class IRBuilder extends VoxBaseVisitor<String> {
 
     @Override
     public String visitInputExpr(VoxParser.InputExprContext ctx) {
+        String dest = newTemp();
+        emit("input " + dest);
+        return dest;
+    }
+
+    /** ask = print the prompt, then input. */
+    @Override
+    public String visitAskExpr(VoxParser.AskExprContext ctx) {
+        emit("print " + visit(ctx.expression()));
         String dest = newTemp();
         emit("input " + dest);
         return dest;

@@ -25,6 +25,8 @@ statement
     | rangeLoop                 # rangeStmt
     | printStatement ';'        # printStmt
     | returnStatement ';'       # returnStmt
+    | repeatLoop                # repeatStmt
+    | SWAP ID AND ID ';'        # swapStmt
     | BREAK ';'                 # breakStmt
     | CONTINUE ';'              # continueStmt
     | expression ';'            # exprStmt
@@ -47,14 +49,23 @@ rangeLoop      : FOR '(' rangeClause ')' block
 rangeClause    : datatype? ID FROM start=expression dir=(TO | UNTIL | DOWN_TO) limit=expression
                  ((STEP | BY) step=expression)? ;
 
+// `repeat 5 times { ... }` and `repeat { ... } until (done)`. The word
+// `times` is the MUL token (as in `a times b`), which is why it appears as
+// MUL here. The count is evaluated once; the until-body runs at least once.
+repeatLoop     : REPEAT expression MUL block                  # repeatTimes
+               | REPEAT block UNTIL '(' expression ')' ';'?   # repeatUntil
+               ;
+
 variableDeclaration
     : DECL_START? datatype ID (ASSIGN expression)?   # declForward
     | expression RASSIGN datatype ID                 # declReverse
+    | LET ID BE expression                           # declLet
     ;
 
 assignment
-    : ID ASSIGN expression    # assignForward
-    | expression RASSIGN ID   # assignReverse
+    : ID ASSIGN expression        # assignForward
+    | expression RASSIGN ID       # assignReverse
+    | SET THE? ID TO expression   # setTo
     ;
 
 // In-place updates. These are statements, never expressions: `i++` has no
@@ -85,7 +96,9 @@ updateStatement
     | ID IS_HALVED                            # halveStmt
     ;
 
-printStatement  : PRINT '(' expression (',' expression)* ')' ;
+printStatement  : PRINT '(' expression (',' expression)* ')'
+                | SAY expression (',' expression)*
+                ;
 returnStatement : RETURN expression? ;
 inputExpression : INPUT_CALL '(' ')' | INPUT ;
 functionCall    : ID '(' (expression (',' expression)*)? ')' ;
@@ -99,12 +112,17 @@ expression
     | expression AS datatype                      # castExpr
     | expression op=(SQUARED | CUBED)             # squaredExpr
     | builtinName expression                      # builtinExpr
+    | ASK expression                              # askExpr
     | <assoc=right> expression POW expression     # powExpr
     | SUB expression                              # negExpr
     | NOT expression                              # notExpr
     | expression op=(MUL|DIV|MOD) expression      # mulExpr
     | expression op=(ADD|SUB) expression          # addExpr
     | expression SUBFROM expression               # subFromExpr
+    // Predicates reuse `is` (EQ) and `is not` (NE), so negation comes free.
+    | expression op=(EQ|NE) pred=(EVEN | ODD | POSITIVE | NEGATIVE | EMPTY)   # predicateExpr
+    | expression op=(EQ|NE) DIVISIBLE BY expression                           # divisibleExpr
+    | expression op=(EQ|NE) BETWEEN low=expression AND high=expression        # betweenExpr
     | expression op=(LE|GE|LT|GT) expression      # relExpr
     | expression op=(EQ|NE) expression            # eqExpr
     | expression AND expression                   # andExpr
@@ -156,6 +174,22 @@ UNTIL    : 'until' ;
 STEP     : 'step' | 'in' S 'steps' S 'of' ;
 BY       : 'by' ;
 THE      : 'the' ;
+
+// Voice and textbook forms.
+SAY       : 'say' ;
+ASK       : 'ask' ;
+SET       : 'set' ;
+LET       : 'let' ;
+BE        : 'be' ;
+SWAP      : 'swap' ;
+REPEAT    : 'repeat' ;
+EVEN      : 'even' ;
+ODD       : 'odd' ;
+POSITIVE  : 'positive' ;
+NEGATIVE  : 'negative' ;
+EMPTY     : 'empty' ;
+DIVISIBLE : 'divisible' ;
+BETWEEN   : 'between' ;
 
 // In-place updates: symbolic ...
 INC        : '++' ;

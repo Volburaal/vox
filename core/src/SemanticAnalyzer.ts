@@ -5,6 +5,9 @@ import {
     BlockContext, ParameterListContext, ReturnTypeContext, DeclForwardContext,
     DeclReverseContext, AssignForwardContext, AssignReverseContext,
     IfStatementContext, WhileLoopContext, ForLoopContext, RangeLoopContext,
+    RepeatTimesContext, RepeatUntilContext, SwapStmtContext, DeclLetContext,
+    SetToContext, AskExprContext, PredicateExprContext, DivisibleExprContext,
+    BetweenExprContext,
     BreakStmtContext, ContinueStmtContext, ExprStmtContext, IncStmtContext,
     DecStmtContext, OpAssignContext, IncreaseByContext, DecreaseByContext,
     AddToContext, TakeFromContext, MultiplyByContext, DivideByContext,
@@ -214,6 +217,18 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         return null;
     };
 
+    /** `let x be 5` declares x with the type of its value. */
+    visitDeclLet = (ctx: DeclLetContext): null => {
+        const valueType = this.visit(ctx.expression());
+        const name = ctx.ID().getText();
+        if (this.declaredHere(name)) {
+            this.error(ctx, `variable '${name}' is already declared in this scope`);
+        } else {
+            this.define(name, valueType === null || valueType === 'error' ? 'any' : valueType);
+        }
+        return null;
+    };
+
     private declareVariable(ctx: ParserRuleContext, name: string,
                             declaredType: string, valueType: string | null): void {
         if (this.declaredHere(name)) {
@@ -237,6 +252,29 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     visitAssignReverse = (ctx: AssignReverseContext): null => {
         const valueType = this.visit(ctx.expression());
         this.checkAssignTarget(ctx, ctx.ID().getText(), valueType);
+        return null;
+    };
+
+    visitSetTo = (ctx: SetToContext): null => {
+        const valueType = this.visit(ctx.expression());
+        this.checkAssignTarget(ctx, ctx.ID().getText(), valueType);
+        return null;
+    };
+
+    /** Each value must fit the other variable's declared type. */
+    visitSwapStmt = (ctx: SwapStmtContext): null => {
+        const a = ctx.ID(0).getText();
+        const b = ctx.ID(1).getText();
+        let missing = false;
+        for (const name of [a, b]) {
+            if (!this.isVisible(name)) {
+                this.error(ctx, `variable '${name}' is not declared`);
+                missing = true;
+            }
+        }
+        if (missing) return null;
+        this.checkAssignable(ctx, this.typeOf(a), this.typeOf(b), a);
+        this.checkAssignable(ctx, this.typeOf(b), this.typeOf(a), b);
         return null;
     };
 
@@ -399,6 +437,26 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         this.error(ctx, `${what} must be a number but got ${t}`);
     }
 
+    visitRepeatTimes = (ctx: RepeatTimesContext): null => {
+        const t = this.visit(ctx.expression());
+        if (t !== null && t !== 'error' && t !== 'any' && t !== 'integer') {
+            this.error(ctx.expression(), `repeat count must be an integer but got ${t}`);
+        }
+        this.loopDepth++;
+        this.visit(ctx.block());
+        this.loopDepth--;
+        return null;
+    };
+
+    visitRepeatUntil = (ctx: RepeatUntilContext): null => {
+        // The body runs before the condition is first tested.
+        this.loopDepth++;
+        this.visit(ctx.block());
+        this.loopDepth--;
+        this.requireCondition(ctx.expression());
+        return null;
+    };
+
     visitBreakStmt = (ctx: BreakStmtContext): null => {
         if (this.loopDepth === 0) {
             this.error(ctx, `'${ctx.BREAK().getText()}' can only be used inside a loop`);
@@ -419,7 +477,7 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         // `x is equal to 5;` compares and throws the answer away. Say so,
         // because in a spoken language it reads like an assignment.
         if (e instanceof EqExprContext) {
-            this.warn(e, "comparison has no effect; to assign, use '<-', '=' or 'which is equal to'");
+            this.warn(e, "comparison has no effect; to assign, use 'set ... to', '<-' or '='");
         } else if (!(e instanceof CallExprContext) && !(e instanceof InputExprContext)) {
             this.warn(e, 'expression has no effect');
         }
@@ -489,6 +547,47 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         this.arithmetic(ctx, this.visit(ctx.expression(0)), this.visit(ctx.expression(1)),
             'subtracted from');
 
+    // ---- predicates: `is even`, `is not positive`, `is divisible by`, ... ----
+
+    visitPredicateExpr = (ctx: PredicateExprContext): string => {
+        const t = this.visit(ctx.expression());
+        if (t !== null && t !== 'error' && t !== 'any') {
+            const pred = ctx._pred.type;
+            const ok = pred === VoxParser.EMPTY
+                ? t === 'string' || t === 'character'
+                : pred === VoxParser.EVEN || pred === VoxParser.ODD
+                    ? t === 'integer'
+                    : isNumeric(t);
+            if (!ok) {
+                this.error(ctx, `operator '${predicateName(ctx._op.type, ctx._pred.text!)}'`
+                    + ` cannot be applied to ${t}`);
+            }
+        }
+        return 'boolean';
+    };
+
+    visitDivisibleExpr = (ctx: DivisibleExprContext): string => {
+        const l = this.visit(ctx.expression(0));
+        const r = this.visit(ctx.expression(1));
+        const bad = (t: string | null): boolean =>
+            t !== null && t !== 'error' && t !== 'any' && t !== 'integer';
+        if (bad(l) || bad(r)) {
+            this.error(ctx, `operator '${predicateName(ctx._op.type, 'divisible by')}'`
+                + ` cannot be applied to ${l} and ${r}`);
+        }
+        return 'boolean';
+    };
+
+    visitBetweenExpr = (ctx: BetweenExprContext): string => {
+        const value = this.visit(ctx.expression(0));
+        const low = this.visit(ctx._low);
+        const high = this.visit(ctx._high);
+        const op = predicateName(ctx._op.type, 'between');
+        this.comparison(ctx, value, low, op, true);
+        this.comparison(ctx, value, high, op, true);
+        return 'boolean';
+    };
+
     private arithmetic(ctx: ParserRuleContext, l: string | null,
                        r: string | null, op: string): string {
         if (l === 'error' || r === 'error') return 'error';
@@ -551,6 +650,11 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     // "true" to a boolean, and anything else to a string. Reporting it as a
     // fixed type would make every realistic use of it a type error.
     visitInputExpr = (_ctx: InputExprContext): string => 'any';
+    // ask prints its prompt, then reads a line exactly like input().
+    visitAskExpr = (ctx: AskExprContext): string => {
+        this.visit(ctx.expression());
+        return 'any';
+    };
 
     visitCallExpr = (ctx: CallExprContext): string | null => {
         const call = ctx.functionCall();
@@ -657,6 +761,11 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
 
 function isNumeric(t: string): boolean {
     return t === 'integer' || t === 'float';
+}
+
+/** 'is even' or 'is not even', regardless of how the operator was spelled. */
+function predicateName(opType: number, pred: string): string {
+    return (opType === VoxParser.NE ? 'is not ' : 'is ') + pred;
 }
 
 /** The value of a numeric literal (possibly negated or parenthesised), else null. */

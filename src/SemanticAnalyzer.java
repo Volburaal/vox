@@ -235,6 +235,19 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         return null;
     }
 
+    /** `let x be 5` declares x with the type of its value. */
+    @Override
+    public String visitDeclLet(VoxParser.DeclLetContext ctx) {
+        String valueType = visit(ctx.expression());
+        String name = ctx.ID().getText();
+        if (declaredHere(name)) {
+            error(ctx, "variable '" + name + "' is already declared in this scope");
+        } else {
+            define(name, valueType == null || "error".equals(valueType) ? "any" : valueType);
+        }
+        return null;
+    }
+
     private void declareVariable(ParserRuleContext ctx, String name,
                                  String declaredType, String valueType) {
         if (declaredHere(name)) {
@@ -258,6 +271,31 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
     public String visitAssignReverse(VoxParser.AssignReverseContext ctx) {
         String valueType = visit(ctx.expression());
         checkAssignTarget(ctx, ctx.ID().getText(), valueType);
+        return null;
+    }
+
+    @Override
+    public String visitSetTo(VoxParser.SetToContext ctx) {
+        String valueType = visit(ctx.expression());
+        checkAssignTarget(ctx, ctx.ID().getText(), valueType);
+        return null;
+    }
+
+    /** Each value must fit the other variable's declared type. */
+    @Override
+    public String visitSwapStmt(VoxParser.SwapStmtContext ctx) {
+        String a = ctx.ID(0).getText();
+        String b = ctx.ID(1).getText();
+        boolean missing = false;
+        for (String name : new String[] { a, b }) {
+            if (!isVisible(name)) {
+                error(ctx, "variable '" + name + "' is not declared");
+                missing = true;
+            }
+        }
+        if (missing) return null;
+        checkAssignable(ctx, typeOf(a), typeOf(b), a);
+        checkAssignable(ctx, typeOf(b), typeOf(a), b);
         return null;
     }
 
@@ -450,6 +488,28 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         error(ctx, what + " must be a number but got " + t);
     }
 
+    @Override
+    public String visitRepeatTimes(VoxParser.RepeatTimesContext ctx) {
+        String t = visit(ctx.expression());
+        if (t != null && !"error".equals(t) && !"any".equals(t) && !"integer".equals(t)) {
+            error(ctx.expression(), "repeat count must be an integer but got " + t);
+        }
+        loopDepth++;
+        visit(ctx.block());
+        loopDepth--;
+        return null;
+    }
+
+    @Override
+    public String visitRepeatUntil(VoxParser.RepeatUntilContext ctx) {
+        // The body runs before the condition is first tested.
+        loopDepth++;
+        visit(ctx.block());
+        loopDepth--;
+        requireCondition(ctx.expression());
+        return null;
+    }
+
     /** The value of a numeric literal (possibly negated or parenthesised), else null. */
     private static Double literalValue(VoxParser.ExpressionContext e) {
         while (e instanceof VoxParser.ParenExprContext) e = ((VoxParser.ParenExprContext) e).expression();
@@ -486,7 +546,7 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         // `x is equal to 5;` compares and throws the answer away. Say so,
         // because in a spoken language it reads like an assignment.
         if (e instanceof VoxParser.EqExprContext) {
-            warn(e, "comparison has no effect; to assign, use '<-', '=' or 'which is equal to'");
+            warn(e, "comparison has no effect; to assign, use 'set ... to', '<-' or '='");
         } else if (!(e instanceof VoxParser.CallExprContext) && !(e instanceof VoxParser.InputExprContext)) {
             warn(e, "expression has no effect");
         }
@@ -573,6 +633,58 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
                 "subtracted from");
     }
 
+    // ---- predicates: `is even`, `is not positive`, `is divisible by`, ... ----
+
+    /** "is even" or "is not even", regardless of how the operator was spelled. */
+    private static String predicateName(int opType, String pred) {
+        return (opType == VoxParser.NE ? "is not " : "is ") + pred;
+    }
+
+    @Override
+    public String visitPredicateExpr(VoxParser.PredicateExprContext ctx) {
+        String t = visit(ctx.expression());
+        if (t != null && !"error".equals(t) && !"any".equals(t)) {
+            int pred = ctx.pred.getType();
+            boolean ok;
+            if (pred == VoxParser.EMPTY) {
+                ok = "string".equals(t) || "character".equals(t);
+            } else if (pred == VoxParser.EVEN || pred == VoxParser.ODD) {
+                ok = "integer".equals(t);
+            } else {
+                ok = isNumeric(t);
+            }
+            if (!ok) {
+                error(ctx, "operator '" + predicateName(ctx.op.getType(), ctx.pred.getText())
+                        + "' cannot be applied to " + t);
+            }
+        }
+        return "boolean";
+    }
+
+    @Override
+    public String visitDivisibleExpr(VoxParser.DivisibleExprContext ctx) {
+        String l = visit(ctx.expression(0));
+        String r = visit(ctx.expression(1));
+        boolean badL = l != null && !"error".equals(l) && !"any".equals(l) && !"integer".equals(l);
+        boolean badR = r != null && !"error".equals(r) && !"any".equals(r) && !"integer".equals(r);
+        if (badL || badR) {
+            error(ctx, "operator '" + predicateName(ctx.op.getType(), "divisible by")
+                    + "' cannot be applied to " + l + " and " + r);
+        }
+        return "boolean";
+    }
+
+    @Override
+    public String visitBetweenExpr(VoxParser.BetweenExprContext ctx) {
+        String value = visit(ctx.expression(0));
+        String low = visit(ctx.low);
+        String high = visit(ctx.high);
+        String op = predicateName(ctx.op.getType(), "between");
+        comparison(ctx, value, low, op, true);
+        comparison(ctx, value, high, op, true);
+        return "boolean";
+    }
+
     private String arithmetic(ParserRuleContext ctx, String l, String r, String op) {
         if ("error".equals(l) || "error".equals(r)) return "error";
         if ("any".equals(l) || "any".equals(r)) return "any";
@@ -641,6 +753,13 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
     // "true" to a boolean, and anything else to a string. Reporting it as a
     // fixed type would make every realistic use of it a type error.
     @Override public String visitInputExpr(VoxParser.InputExprContext ctx)   { return "any"; }
+
+    // ask prints its prompt, then reads a line exactly like input().
+    @Override
+    public String visitAskExpr(VoxParser.AskExprContext ctx) {
+        visit(ctx.expression());
+        return "any";
+    }
 
     @Override
     public String visitCallExpr(VoxParser.CallExprContext ctx) {

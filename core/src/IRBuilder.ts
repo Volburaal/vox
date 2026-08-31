@@ -3,7 +3,10 @@ import VoxParser, {
     ProgramContext, PrototypeContext, DefinitionContext, MainFunctionContext,
     BlockContext, DeclForwardContext, DeclReverseContext, AssignForwardContext,
     AssignReverseContext, IfStatementContext, WhileLoopContext, ForLoopContext,
-    RangeLoopContext, BreakStmtContext, ContinueStmtContext, IncStmtContext,
+    RangeLoopContext, RepeatTimesContext, RepeatUntilContext, SwapStmtContext,
+    DeclLetContext, SetToContext, AskExprContext, PredicateExprContext,
+    DivisibleExprContext, BetweenExprContext,
+    BreakStmtContext, ContinueStmtContext, IncStmtContext,
     DecStmtContext, OpAssignContext, IncreaseByContext, DecreaseByContext,
     AddToContext, TakeFromContext, MultiplyByContext, DivideByContext,
     DoubleStmtContext, HalveStmtContext, PrintStatementContext,
@@ -105,12 +108,22 @@ export class IRBuilder extends VoxVisitor<string | null> {
         return null;
     };
 
+    visitDeclLet = (ctx: DeclLetContext): null => {
+        this.emit(`set ${ctx.ID().getText()} ${this.visit(ctx.expression())}`);
+        return null;
+    };
+
     visitAssignForward = (ctx: AssignForwardContext): null => {
         this.emit(`set ${ctx.ID().getText()} ${this.visit(ctx.expression())}`);
         return null;
     };
 
     visitAssignReverse = (ctx: AssignReverseContext): null => {
+        this.emit(`set ${ctx.ID().getText()} ${this.visit(ctx.expression())}`);
+        return null;
+    };
+
+    visitSetTo = (ctx: SetToContext): null => {
         this.emit(`set ${ctx.ID().getText()} ${this.visit(ctx.expression())}`);
         return null;
     };
@@ -150,6 +163,17 @@ export class IRBuilder extends VoxVisitor<string | null> {
         this.emit(`${op} ${name} ${name} ${operand}`);
         return null;
     }
+
+    /** Swap through a temporary: three moves, no arithmetic. */
+    visitSwapStmt = (ctx: SwapStmtContext): null => {
+        const a = ctx.ID(0).getText();
+        const b = ctx.ID(1).getText();
+        const t = this.newTemp();
+        this.emit(`set ${t} ${a}`);
+        this.emit(`set ${a} ${b}`);
+        this.emit(`set ${b} ${t}`);
+        return null;
+    };
 
     // ------------------------------------------------------------ control --
 
@@ -258,6 +282,43 @@ export class IRBuilder extends VoxVisitor<string | null> {
         return copy;
     }
 
+    /** `repeat n times` counts a hidden temporary down from n to 1. */
+    visitRepeatTimes = (ctx: RepeatTimesContext): null => {
+        const start = this.newLabel('repeat');
+        const end = this.newLabel('endrepeat');
+        const cont = this.newLabel('repcont');
+        const counter = this.newTemp();
+        this.emit(`set ${counter} ${this.visit(ctx.expression())}`);
+        this.emit('label ' + start);
+        const cond = this.newTemp();
+        this.emit(`gt ${cond} ${counter} 0`);
+        this.emit(`if_false ${cond} goto ${end}`);
+        this.loops.push({ breakLabel: end, continueLabel: cont });
+        this.visit(ctx.block());
+        this.loops.pop();
+        this.emit('label ' + cont);
+        this.emit(`sub ${counter} ${counter} 1`);
+        this.emit('goto ' + start);
+        this.emit('label ' + end);
+        return null;
+    };
+
+    /** `repeat { } until (c)`: the body runs, then c decides whether to loop back. */
+    visitRepeatUntil = (ctx: RepeatUntilContext): null => {
+        const start = this.newLabel('repeat');
+        const end = this.newLabel('endrepeat');
+        const cont = this.newLabel('repcont');
+        this.emit('label ' + start);
+        this.loops.push({ breakLabel: end, continueLabel: cont });
+        this.visit(ctx.block());
+        this.loops.pop();
+        this.emit('label ' + cont);
+        const cond = this.visit(ctx.expression());
+        this.emit(`if_false ${cond} goto ${start}`);
+        this.emit('label ' + end);
+        return null;
+    };
+
     visitBreakStmt = (_ctx: BreakStmtContext): null => {
         this.emit('goto ' + this.loops[this.loops.length - 1].breakLabel);
         return null;
@@ -355,6 +416,57 @@ export class IRBuilder extends VoxVisitor<string | null> {
         return dest;
     };
 
+    // ---- predicates lower to the comparisons they abbreviate; `is not` flips the test.
+
+    visitPredicateExpr = (ctx: PredicateExprContext): string => {
+        const value = this.visit(ctx.expression());
+        const negated = ctx._op.type === VoxParser.NE;
+        const pred = ctx._pred.type;
+        if (pred === VoxParser.EVEN || pred === VoxParser.ODD) {
+            const wantZero = (pred === VoxParser.EVEN) !== negated;
+            const m = this.newTemp();
+            this.emit(`mod ${m} ${value} 2`);
+            const dest = this.newTemp();
+            this.emit(`${wantZero ? 'eq' : 'ne'} ${dest} ${m} 0`);
+            return dest;
+        }
+        const dest = this.newTemp();
+        if (pred === VoxParser.POSITIVE) {
+            this.emit(`${negated ? 'le' : 'gt'} ${dest} ${value} 0`);
+        } else if (pred === VoxParser.NEGATIVE) {
+            this.emit(`${negated ? 'ge' : 'lt'} ${dest} ${value} 0`);
+        } else { // EMPTY
+            this.emit(`${negated ? 'ne' : 'eq'} ${dest} ${value} ""`);
+        }
+        return dest;
+    };
+
+    visitDivisibleExpr = (ctx: DivisibleExprContext): string => {
+        const value = this.visit(ctx.expression(0));
+        const divisor = this.visit(ctx.expression(1));
+        const m = this.newTemp();
+        this.emit(`mod ${m} ${value} ${divisor}`);
+        const dest = this.newTemp();
+        this.emit(`${ctx._op.type === VoxParser.NE ? 'ne' : 'eq'} ${dest} ${m} 0`);
+        return dest;
+    };
+
+    visitBetweenExpr = (ctx: BetweenExprContext): string => {
+        const value = this.visit(ctx.expression(0));
+        const low = this.visit(ctx._low);
+        const high = this.visit(ctx._high);
+        const aboveLow = this.newTemp();
+        this.emit(`ge ${aboveLow} ${value} ${low}`);
+        const belowHigh = this.newTemp();
+        this.emit(`le ${belowHigh} ${value} ${high}`);
+        const dest = this.newTemp();
+        this.emit(`and ${dest} ${aboveLow} ${belowHigh}`);
+        if (ctx._op.type !== VoxParser.NE) return dest;
+        const inverted = this.newTemp();
+        this.emit(`not ${inverted} ${dest}`);
+        return inverted;
+    };
+
     visitRelExpr = (ctx: RelExprContext): string => {
         const op = ctx._op.type === VoxParser.LE ? 'le'
             : ctx._op.type === VoxParser.GE ? 'ge'
@@ -404,6 +516,14 @@ export class IRBuilder extends VoxVisitor<string | null> {
     };
 
     visitInputExpr = (_ctx: InputExprContext): string => {
+        const dest = this.newTemp();
+        this.emit('input ' + dest);
+        return dest;
+    };
+
+    /** ask = print the prompt, then input. */
+    visitAskExpr = (ctx: AskExprContext): string => {
+        this.emit(`print ${this.visit(ctx.expression())}`);
         const dest = this.newTemp();
         this.emit('input ' + dest);
         return dest;
