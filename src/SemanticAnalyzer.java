@@ -28,7 +28,7 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
     /** What a builtin accepts ("num" or "string" per parameter) and returns. */
     static final class BuiltinSpec {
         final String[] params;
-        /** A fixed type, or "numeric" to follow the arguments (float if any float). */
+        /** A fixed type or "numeric" to follow the arguments (float if any float). */
         final String result;
         BuiltinSpec(String result, String... params) {
             this.result = result;
@@ -750,7 +750,7 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
     @Override public String visitStringExpr(VoxParser.StringExprContext ctx) { return "string"; }
     @Override public String visitBoolExpr(VoxParser.BoolExprContext ctx)     { return "boolean"; }
     // input() is dynamically typed: the runtime coerces "12" to an integer,
-    // "true" to a boolean, and anything else to a string. Reporting it as a
+    // "true" to a boolean and anything else to a string. Reporting it as a
     // fixed type would make every realistic use of it a type error.
     @Override public String visitInputExpr(VoxParser.InputExprContext ctx)   { return "any"; }
 

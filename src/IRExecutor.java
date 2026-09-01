@@ -266,7 +266,7 @@ public class IRExecutor {
         }
     }
 
-    /** Pops the current frame. Returns the resume pc, or -1 if the program is done. */
+    /** Pops the current frame. Returns the resume pc or -1 if the program is done. */
     private int doReturn(Object value) {
         Frame finished = callStack.pop();
         if (callStack.isEmpty()) return -1; // returned out of main

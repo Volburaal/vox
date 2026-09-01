@@ -6,7 +6,7 @@ import java.util.*;
  * IR for the same source.
  *
  * Every visit* method for an expression returns an operand: a literal, a
- * variable name, or the name of a freshly allocated temporary.
+ * variable name or the name of a freshly allocated temporary.
  */
 public class IRBuilder extends VoxBaseVisitor<String> {
 
@@ -241,7 +241,7 @@ public class IRBuilder extends VoxBaseVisitor<String> {
             visit(ctx.thenBlock);
             emit("goto " + end);
             emit("label " + elseLabel);
-            visit(otherwise); // a block, or the next `if` in the chain
+            visit(otherwise); // a block or the next `if` in the chain
             emit("label " + end);
         }
         return null;

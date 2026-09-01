@@ -83,7 +83,7 @@ export default function MascotFigure({
       viewBox={`0 0 ${CANVAS_W} ${IMG_H}`}
       className={`h-auto w-full ${className}`}
       role="img"
-      aria-label="The Vox mascot with its parts labelled: the eyes form an X, the head an O, and the body a V - reading VOX from the bottom up. The blue smile and tie are the radio host's suit."
+      aria-label="The Vox mascot with its parts labelled: the eyes form an X, the head an O and the body a V - reading VOX from the bottom up. The blue smile and tie are the radio host's suit."
     >
       <defs>
         <filter id="glow-red" x="-50%" y="-50%" width="200%" height="200%">

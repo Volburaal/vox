@@ -35,7 +35,7 @@ export const PHRASES = [
   ...OPERATOR_PHRASES, ...BUILTIN_PHRASES,
 ].sort((a, b) => b.length - a.length);
 
-const KEYWORDS = new Set([
+export const KEYWORDS = new Set([
   'main', 'program', 'code', 'if', 'else', 'otherwise', 'while', 'for', 'action',
   'print', 'say', 'input', 'ask', 'return',
   'break', 'stop', 'continue', 'skip', 'void', 'nothing', 'procedure', 'as',
@@ -48,13 +48,14 @@ const KEYWORDS = new Set([
   'set', 'let', 'be', 'swap', 'repeat',
   'even', 'odd', 'positive', 'negative', 'empty', 'divisible', 'between',
 ]);
-const TYPES = new Set(['int', 'integer', 'number', 'float', 'bool', 'boolean', 'character', 'char', 'string', 'varchar']);
-const WORD_OPERATORS = new Set([
+export const TYPES = new Set(['int', 'integer', 'number', 'float', 'bool', 'boolean', 'character', 'char', 'string', 'varchar']);
+export const WORD_OPERATORS = new Set([
   'is', 'equals', 'minus', 'plus', 'times', 'and', 'or', 'not', 'squared', 'cubed',
 ]);
-const BOOLS = new Set(['true', 'false']);
+export const BOOLS = new Set(['true', 'false']);
 
-const phraseKind = new Map<string, string>();
+/** What each multi-word phrase is, so static and live highlighting agree. */
+export const phraseKind = new Map<string, string>();
 for (const p of DECL_STARTERS) phraseKind.set(p, 'keyword');
 for (const p of KEYWORD_PHRASES) phraseKind.set(p, 'keyword');
 for (const p of ASSIGN_PHRASES) phraseKind.set(p, 'operator');

@@ -2,7 +2,7 @@
 REM Vox launcher.
 REM
 REM Unlike the previous version this does NOT regenerate the parser or
-REM recompile on every run, and it never copies sources into your working
+REM recompile on every run and it never copies sources into your working
 REM directory. Run build.bat once, then put this folder on your PATH.
 
 setlocal
