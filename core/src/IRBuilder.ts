@@ -13,7 +13,7 @@ import VoxParser, {
     ReturnStatementContext, ParenExprContext, CastExprContext,
     BuiltinExprContext, NegExprContext, SquaredExprContext, NotExprContext, PowExprContext,
     MulExprContext, AddExprContext, SubFromExprContext, RelExprContext,
-    EqExprContext andExprContext orExprContext, IdExprContext,
+    EqExprContext, AndExprContext, OrExprContext, IdExprContext,
     IntExprContext, FloatExprContext, StringExprContext, BoolExprContext,
     InputExprContext, CallExprContext, FunctionCallContext, ExpressionContext,
 } from './gen/VoxParser.js';

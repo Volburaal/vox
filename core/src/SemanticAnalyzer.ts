@@ -14,7 +14,7 @@ import {
     DoubleStmtContext, HalveStmtContext, ExpressionContext, ParenExprContext,
     CastExprContext, BuiltinExprContext, BuiltinNameContext, NegExprContext,
     SquaredExprContext, NotExprContext, PowExprContext, MulExprContext, AddExprContext,
-    SubFromExprContext, RelExprContext, EqExprContext andExprContext,
+    SubFromExprContext, RelExprContext, EqExprContext, AndExprContext,
     OrExprContext, IdExprContext, IntExprContext, FloatExprContext,
     StringExprContext, BoolExprContext, InputExprContext, CallExprContext,
     FunctionCallContext, PrintStatementContext, ReturnStatementContext,
@@ -608,7 +608,7 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
             ctx._op.text, false);
 
     private comparison(ctx: ParserRuleContext, l: string | null,
-                       r: string | null, op: string ordered: boolean): string {
+                       r: string | null, op: string, ordered: boolean): string {
         if (l === 'error' || r === 'error') return 'error';
         if (l === 'any' || r === 'any') return 'boolean';
         const ok = l !== null && r !== null
