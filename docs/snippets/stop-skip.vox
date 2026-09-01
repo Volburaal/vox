@@ -1,0 +1,8 @@
+main {
+    // stop leaves the loop; skip jumps to its next turn.
+    for i from 1 to 10 {
+        if (i is even) { skip; }
+        if (i > 7) { stop; }
+        say i;
+    }
+}

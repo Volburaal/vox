@@ -1,0 +1,12 @@
+main {
+    let x be 3;
+
+    say x ^ 2;
+    say x ** 2;
+    say x to the power of 2;
+    say x raised to the power of 2;
+    say x squared;
+    say x cubed;
+
+    say 2 ^ -1;               // a negative exponent gives a float
+}

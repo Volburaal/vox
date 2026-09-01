@@ -1,0 +1,13 @@
+main {
+    // print writes exactly what you give it - no newline is added.
+    print("no");
+    print(" newline");
+    print(" until you ask", '\n');
+
+    // say prints its arguments and ends the line for you.
+    say "a whole line";
+
+    // Either quote style works; escapes are \n \t \r \" \' and \.
+    print("tab:\there", '\n');
+    print('single quoted ', "and double", '\n');
+}

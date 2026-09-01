@@ -1,0 +1,10 @@
+main {
+    integer countdown <- 3;
+
+    while (countdown > 0) {
+        say countdown;
+        decrement countdown;
+    }
+
+    say "lift off";
+}

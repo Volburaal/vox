@@ -1,0 +1,19 @@
+integer twice(integer n) {
+    return n * 2;
+}
+
+integer fib(integer n) {
+    if (n is less than 2) {
+        return n;
+    }
+    return fib(n - 1) + fib(n - 2);      // recursion gets its own frame
+}
+
+main {
+    say twice(21);
+
+    for i from 0 until 8 {
+        print(fib(i), " ");
+    }
+    print('\n');
+}

@@ -1,0 +1,15 @@
+main {
+    integer plain;                                       // defaults to 0
+    integer arrow <- 5;
+    consider an integer considered which is equal to 7;
+    let there be a whole number spelled which equals 9;
+    12 -> integer reversed;                              // reverse declaration
+
+    say plain, " ", arrow, " ", considered, " ", spelled, " ", reversed;
+
+    // Every type has a default: 0, 0.0, false and the empty string.
+    float ratio;
+    boolean flag;
+    string label;
+    say "[", ratio, "] [", flag, "] [", label, "]";
+}

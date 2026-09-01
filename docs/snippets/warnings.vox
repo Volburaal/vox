@@ -1,0 +1,6 @@
+main {
+    let temperature be 30;
+
+    temperature is equal to 30;    // a comparison, not an assignment
+    say "still ", temperature;
+}

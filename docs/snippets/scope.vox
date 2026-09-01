@@ -1,0 +1,20 @@
+integer twice(integer n) {
+    return n * 2;                    // this n belongs to this call alone
+}
+
+integer countdown(integer n) {
+    if (n is less or equal to 0) {
+        return 0;
+    }
+    say "tick ", n;
+    return countdown(n - 1);         // every call gets a fresh n
+}
+
+main {
+    integer n <- 10;
+
+    say "twice: ", twice(n);
+    say "n is still ", n;            // the call could not touch it
+
+    countdown(3);
+}

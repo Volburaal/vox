@@ -1,0 +1,9 @@
+main {
+    say 1 + 2 * 3;             // 7   - multiply before add
+    say (1 + 2) * 3;           // 9
+    say 2 ^ 3 ^ 2;             // 512 - powers are right associative
+    say -2 ^ 2;                // -4  - the minus applies to the power
+    say 10 - 2 - 3;            // 5   - subtraction is left associative
+    say 1 + 2 < 4;             // true - arithmetic before comparison
+    say length of "vox" + 1;   // 4   - a spoken builtin takes the next term only
+}

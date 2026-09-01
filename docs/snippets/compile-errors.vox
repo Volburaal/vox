@@ -1,0 +1,4 @@
+main {
+    integer count <- "not a number";
+    say total;
+}

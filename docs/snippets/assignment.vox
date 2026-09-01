@@ -1,0 +1,16 @@
+main {
+    integer total <- 0;
+
+    total = 5;                   // symbol
+    total <- total + 5;          // arrow
+    total + 5 -> total;          // reverse arrow
+    set total to total + 5;      // spoken
+    set the total to total + 5;  // `the` is optional
+    say "total: ", total;
+
+    // swap exchanges two variables through a hidden temporary.
+    integer first <- 1;
+    integer second <- 2;
+    swap first and second;
+    say first, " ", second;
+}

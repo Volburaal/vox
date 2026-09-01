@@ -1,0 +1,13 @@
+main {
+    // `let x be` takes its type from the value.
+    let count be 3;              // integer
+    let ratio be 0.5;            // float
+    let title be "Vox";          // string
+    let live be true;            // boolean
+
+    say count, " ", ratio, " ", title, " ", live;
+
+    // The inferred type is enforced from then on.
+    set count to count + 1;
+    say "count is now ", count;
+}

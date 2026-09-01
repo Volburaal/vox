@@ -1,0 +1,12 @@
+main {
+    repeat 3 times {
+        say "on the air";
+    }
+
+    // The body runs first, then the condition decides.
+    integer n <- 1;
+    repeat {
+        double n;
+    } until (n > 20);
+    say "n reached ", n;
+}

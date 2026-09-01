@@ -24,6 +24,9 @@ export default function Nav() {
         </Link>
 
         <nav className="flex items-center gap-1 text-sm">
+          <NavLink to="/docs" className={linkClass}>
+            Docs
+          </NavLink>
           <NavLink to="/playground" className={linkClass}>
             Playground
           </NavLink>

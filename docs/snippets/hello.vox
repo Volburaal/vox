@@ -1,0 +1,8 @@
+// Every program starts at main. You may also spell it `program` or `code`.
+main {
+    say "Hello from Vox.";
+
+    /* Statements end with a semicolon.
+       Comments come in both styles. */
+    say "The year is ", 2026, ".";
+}

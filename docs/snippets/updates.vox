@@ -1,0 +1,15 @@
+main {
+    integer n <- 10;
+
+    n++;               increment n;       // 12
+    n--;               decrement n;       // 10
+    n += 5;            add 5 to n;        // 20
+    n -= 2;            take 2 from n;     // 16
+    n *= 2;            multiply n by 2;   // 64
+    n /= 4;            divide n by 4;     // 4
+    double n;          n is doubled;      // 16
+    halve n;           n is halved;       // 4
+    increase n by 6;   decrease n by 2;   // 8
+
+    say "n ends at ", n;
+}

@@ -1,4 +1,4 @@
-// The voice of Vox: say, ask, and sentences that answer back.
+// The voice of Vox: say, ask and sentences that answer back.
 main {
     say "Good evening, listeners. I am Vox.";
     let name be ask "Who is on the line?";

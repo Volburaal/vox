@@ -1,0 +1,5 @@
+main {
+    say "before";
+    integer bad <- "twelve" as integer;
+    say "never reached";
+}

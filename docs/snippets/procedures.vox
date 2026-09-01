@@ -1,0 +1,20 @@
+// A forward declaration: the definition may come later in the file.
+procedure banner(string title);
+
+procedure greet(string who) {
+    if (who is empty) {
+        return;                          // an early return, with no value
+    }
+    say "Welcome, ", who, "!";
+}
+
+procedure banner(string title) {
+    say "--- ", title, " ---";
+}
+
+main {
+    banner("Vox Radio");
+    greet("listener");
+    greet("");
+    banner("goodnight");
+}

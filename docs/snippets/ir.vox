@@ -1,0 +1,9 @@
+main {
+    integer total <- 0;
+
+    for i from 1 to 3 {
+        add i to total;
+    }
+
+    say total;
+}

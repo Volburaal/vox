@@ -1,0 +1,11 @@
+main {
+    let score be 72;
+
+    if (score is greater or equal to 90) {
+        say "top marks";
+    } else if (score is greater or equal to 60) {
+        say "a pass";
+    } otherwise {                    // `otherwise` is `else`
+        say "not this time";
+    }
+}

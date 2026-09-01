@@ -1,0 +1,13 @@
+   0  func_start main
+   1  set total 0
+   2  set i 1
+   3  label L_for_0
+   4  le t0 i 3
+   5  if_false t0 goto L_endfor_1
+   6  add total total i
+   7  label L_forcont_2
+   8  add i i 1
+   9  goto L_for_0
+  10  label L_endfor_1
+  11  print total "\n"
+  12  func_end main

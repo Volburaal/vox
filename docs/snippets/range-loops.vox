@@ -1,0 +1,17 @@
+main {
+    for i from 1 to 3 {            // inclusive
+        say "up ", i;
+    }
+    for i from 3 down to 1 {       // counts down
+        say "down ", i;
+    }
+    for i from 0 until 3 {         // exclusive
+        say "until ", i;
+    }
+    for i from 0 to 10 step 5 {    // also: by 5, in steps of 5
+        say "step ", i;
+    }
+    for float x from 0.0 to 1.0 in steps of 0.5 {
+        say "float ", x;
+    }
+}

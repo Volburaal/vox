@@ -1,0 +1,15 @@
+main {
+    let a be 10;
+    let b be 4;
+
+    // Every operator has a spoken form and a symbol. Same instruction either way.
+    say a added to b,        " = ", a + b;
+    say a minus b,           " = ", a - b;
+    say a multiplied by b,   " = ", a * b;
+    say a divided by b,      " = ", a / b;
+    say a remainder from b,  " = ", a % b;
+    say a is greater than b, " = ", a > b;
+
+    // `subtracted from` reads backwards, as it does in English.
+    say b subtracted from a, " = ", a - b;
+}

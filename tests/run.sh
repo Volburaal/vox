@@ -105,6 +105,64 @@ for src in tests/fail/*.vox; do
     fi
 done
 
+# ---- documentation snippets -------------------------------------------------
+# Every code block on the website's /docs page is a real program here, checked
+# against the output the page shows. Docs cannot drift from the compiler.
+#
+#   docs/snippets/NAME.vox  + NAME.out   exact stdout
+#                           + NAME.err   exact diagnostics (path prefix stripped)
+#                           + NAME.ir    exact emitted IR
+#                           + NAME.in    optional stdin
+for src in docs/snippets/*.vox; do
+    name="$(basename "$src" .vox)"
+    stdin_file="docs/snippets/$name.in"
+    [ -f "$stdin_file" ] || stdin_file="/dev/null"
+
+    problem=""
+    checked=0
+
+    if [ -f "docs/snippets/$name.out" ]; then
+        checked=1
+        actual="$($VOX_CMD "$src" < "$stdin_file" 2>/dev/null | strip_cr)"
+        expected="$(strip_cr < "docs/snippets/$name.out")"
+        if [ "$actual" != "$expected" ]; then
+            problem="stdout mismatch"
+            diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") \
+                | sed 's/^/        /' | head -10
+        fi
+    fi
+
+    if [ -z "$problem" ] && [ -f "docs/snippets/$name.err" ]; then
+        checked=1
+        # Diagnostics carry the source path; the page shows them without it.
+        actual="$($VOX_CMD "$src" < "$stdin_file" 2>&1 >/dev/null \
+            | strip_cr | sed -e "s|^$src: *||" -e 's/^\(> \)*//')"
+        expected="$(strip_cr < "docs/snippets/$name.err")"
+        if [ "$actual" != "$expected" ]; then
+            problem="stderr mismatch"
+            diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") \
+                | sed 's/^/        /' | head -10
+        fi
+    fi
+
+    if [ -z "$problem" ] && [ -f "docs/snippets/$name.ir" ]; then
+        checked=1
+        actual="$($VOX_CMD "$src" --emit-ir --check 2>/dev/null | strip_cr)"
+        expected="$(strip_cr < "docs/snippets/$name.ir")"
+        [ "$actual" = "$expected" ] || problem="IR mismatch"
+    fi
+
+    [ "$checked" -eq 0 ] && problem="no .out/.err/.ir file"
+
+    if [ -z "$problem" ]; then
+        echo "ok    docs:$name"
+        pass=$((pass + 1))
+    else
+        echo "FAIL  docs:$name ($problem)"
+        fail=$((fail + 1)); failed_names+=("docs:$name")
+    fi
+done
+
 # ---- the shipped examples must at least run ---------------------------------
 for src in examples/*.vox; do
     name="$(basename "$src" .vox)"

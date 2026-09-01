@@ -1,0 +1,15 @@
+main {
+    // `as` converts explicitly and fails loudly when it cannot.
+    integer n <- "42" as integer;
+    float f <- 7 as float;
+    string s <- 5 as string;
+    boolean b <- 0 as boolean;
+
+    say n + 1;
+    say f / 2;
+    say s + "!";
+    say b;
+
+    // Casts bind tighter than arithmetic.
+    say ("3.5" as float) * 2;
+}

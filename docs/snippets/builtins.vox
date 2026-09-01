@@ -1,0 +1,11 @@
+main {
+    say square root of 16;
+    say absolute value of -7;
+    say length of "vox";
+    say uppercase of "vox";
+    say floor of 2.7, " ", ceiling of 2.1;
+
+    // Every spoken builtin has a symbolic twin.
+    say sqrt(16), " ", abs(-7), " ", length("vox");
+    say round(2.5), " ", min(3, 9), " ", max(3, 9);
+}

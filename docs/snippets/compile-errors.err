@@ -1,0 +1,3 @@
+line 2:4 error: cannot assign string to integer 'count'
+line 3:8 error: variable 'total' is not declared
+2 errors

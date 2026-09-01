@@ -1,0 +1,14 @@
+main {
+    let n be 12;
+
+    say n is even;                 // parity, integers only
+    say n is not even;             // `is not` negates any predicate
+    say n is divisible by 4;
+    say n is between 10 and 20;    // inclusive at both ends
+    say -n is negative;
+    say "" is empty;               // for strings
+
+    if (n is even and n is divisible by 3) {
+        say "twelve is both";
+    }
+}

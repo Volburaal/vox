@@ -1,0 +1,11 @@
+main {
+    // ask prints a prompt, then reads one line back.
+    let listener be ask "Who is listening? ";
+    say "Hello, ", listener, "!";
+
+    // input() is the same without a prompt. Both coerce what they read:
+    // digits become an integer, 1.5 a float, true/false a boolean.
+    print("Pick a number: ");
+    integer pick <- input();
+    say "Twice that is ", pick * 2;
+}
