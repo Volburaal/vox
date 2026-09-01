@@ -13,7 +13,7 @@ import VoxParser, {
     ReturnStatementContext, ParenExprContext, CastExprContext,
     BuiltinExprContext, NegExprContext, SquaredExprContext, NotExprContext, PowExprContext,
     MulExprContext, AddExprContext, SubFromExprContext, RelExprContext,
-    EqExprContext, AndExprContext, OrExprContext, IdExprContext,
+    EqExprContext andExprContext orExprContext, IdExprContext,
     IntExprContext, FloatExprContext, StringExprContext, BoolExprContext,
     InputExprContext, CallExprContext, FunctionCallContext, ExpressionContext,
 } from './gen/VoxParser.js';
@@ -30,7 +30,7 @@ interface LoopLabels {
  * runs. A direct port of the Java IRBuilder: both engines must emit identical
  * IR for the same source.
  *
- * Every expression visitor returns an operand: a literal, a variable name, or
+ * Every expression visitor returns an operand: a literal, a variable name or
  * the name of a freshly allocated temporary.
  */
 export class IRBuilder extends VoxVisitor<string | null> {
@@ -193,7 +193,7 @@ export class IRBuilder extends VoxVisitor<string | null> {
             this.visit(ctx._thenBlock);
             this.emit('goto ' + end);
             this.emit('label ' + elseLabel);
-            this.visit(otherwise); // a block, or the next `if` in the chain
+            this.visit(otherwise); // a block or the next `if` in the chain
             this.emit('label ' + end);
         }
         return null;

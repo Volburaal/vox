@@ -15,11 +15,11 @@
 - Variables and data types
 - Arithmetic and logical expressions, with real operator precedence
 - Conditionals (`if`, `else if`, `otherwise`) and spoken predicates (`is even`, `is between 1 and 10`)
-- Loops: `while`, the classic `for`, range loops (`for i from 1 to 10`, `down to`, `step`), and `repeat 5 times` / `repeat ... until`
+- Loops: `while`, the classic `for`, range loops (`for i from 1 to 10`, `down to`, `step`) and `repeat 5 times` / `repeat ... until`
 - In-place updates in both spellings: `n++` / `increment n`, `n += 3` / `add 3 to n`, `double n`
 - The voice forms: `say`, `ask`, `set ... to`, `let ... be`, `swap ... and ...`
 - `print` writes raw text - `'\n'` ends a line; `say` always ends the line
-- Functions, procedures, forward declarations, and recursion
+- Functions, procedures, forward declarations and recursion
 - `main { }` may also be spelled `program { }` or `code { }`
 - Input/Output operations
 
@@ -96,7 +96,7 @@ or, in a POSIX shell:
 ./build.sh
 ```
 
-This generates the parser, compiles everything, and packages a self-contained
+This generates the parser, compiles everything and packages a self-contained
 `build/vox.jar`.
 
 ### 3. Put Vox on your PATH (optional)
@@ -139,9 +139,14 @@ node core/dist/cli.js examples/factorial.vox
 ### Web playground
 
 `web/` is a React + Vite + Tailwind site. There is no backend: the TypeScript engine runs in a Web Worker, so
-a runaway program can be stopped without freezing the page, and `input()`
+a runaway program can be stopped without freezing the page and `input()`
 prompts inline in the console. The editor runs the real compiler as you type
 and underlines syntax and semantic errors.
+
+Three routes: `/` (the pitch), `/docs` (the language reference, every example
+of which is a tested program from `docs/snippets/`) and `/playground`. The
+playground accepts `?example=<id>` or `?code=<base64url>`, which is how the
+"run it" links on the docs page work.
 
 ```bash
 npm run dev            # builds core, then starts the dev server
@@ -158,6 +163,20 @@ VOX_CMD="node core/dist/cli.js" ./tests/run.sh     # TypeScript engine
 `tests/run/` holds programs with expected output (plus optional `.in` stdin),
 `tests/fail/` holds programs that must be rejected with a given exit code and
 message. The same suite drives both engines, which keeps them in lockstep.
+
+`docs/snippets/` holds the examples shown on the website's documentation page,
+and the suite runs those too:
+
+| File       | Checked against                                    |
+| ---------- | -------------------------------------------------- |
+| `NAME.vox` | the program                                        |
+| `NAME.out` | its exact stdout                                   |
+| `NAME.err` | its exact diagnostics, with the file path stripped |
+| `NAME.ir`  | its exact emitted IR                               |
+| `NAME.in`  | optional stdin                                     |
+
+The page displays those same files, so a documented example cannot drift from
+the compiler: change the language and the docs fail the build.
 
 ## Examples
 
@@ -238,7 +257,7 @@ main {
 
 `a subtracted from b` evaluates to `b - a`. Prefix and postfix forms apply to
 the term next to them: `-x squared` is `-(x squared)`, `2 * x squared` is
-`2 * (x squared)`, and `square root of x squared` is `sqrt(x squared)`.
+`2 * (x squared)` and `square root of x squared` is `sqrt(x squared)`.
 
 Multi-word operators and declaration starters may span newlines, so this is
 valid:
@@ -250,7 +269,7 @@ if (total is greater
 
 ### Assignment
 
-Assignment is `=`, `<-`, `which is equal to`, or `which equals`. Reverse
+Assignment is `=`, `<-`, `which is equal to` or `which equals`. Reverse
 assignment is `->`.
 
 `<=` and `=>` are **comparisons only**. They previously doubled as assignment
@@ -266,7 +285,7 @@ let there be a whole number w which equals 9;
 5 -> integer v;                             // reverse declaration
 ```
 
-Defaults are `0` for `integer`, `0.0` for `float`, `false` for `boolean`, and
+Defaults are `0` for `integer`, `0.0` for `float`, `false` for `boolean` and
 the empty string for `string` and `character`.
 
 ### input()
@@ -319,7 +338,7 @@ warns that it has no effect and points you at `set`.
 
 ### Predicates
 
-Conditions can be spoken, and `is not` negates every predicate:
+Conditions can be spoken and `is not` negates every predicate:
 
 | Predicate                        | Meaning                |
 | -------------------------------- | ---------------------- |
@@ -398,7 +417,7 @@ symbolic twin.
 
 `the` is optional after every verb (`add 3 to the total`). An update is
 type-checked exactly like the assignment it stands for: `s += "!"` concatenates
-when `s` is a string, `halve n` on an integer is integer division, and
+when `s` is a string, `halve n` on an integer is integer division and
 `increment name` on a string is a compile error. The classic `for` loop takes
 an update as its third clause: `for (integer i <- 1; i <= 5; i++)`.
 
@@ -433,7 +452,7 @@ and `x ^ 3`.
 ### Procedures
 
 A function that returns nothing is declared with `procedure`, `void` or
-`nothing`. It may `return;` early but cannot return a value, and calling it
+`nothing`. It may `return;` early but cannot return a value and calling it
 where a value is expected is a compile error.
 
 ```java

@@ -14,7 +14,7 @@ import {
     DoubleStmtContext, HalveStmtContext, ExpressionContext, ParenExprContext,
     CastExprContext, BuiltinExprContext, BuiltinNameContext, NegExprContext,
     SquaredExprContext, NotExprContext, PowExprContext, MulExprContext, AddExprContext,
-    SubFromExprContext, RelExprContext, EqExprContext, AndExprContext,
+    SubFromExprContext, RelExprContext, EqExprContext andExprContext,
     OrExprContext, IdExprContext, IntExprContext, FloatExprContext,
     StringExprContext, BoolExprContext, InputExprContext, CallExprContext,
     FunctionCallContext, PrintStatementContext, ReturnStatementContext,
@@ -31,7 +31,7 @@ interface Signature {
 /** What a builtin accepts ('num' or 'string' per parameter) and returns. */
 interface BuiltinSpec {
     params: ('num' | 'string')[];
-    /** A fixed type, or 'numeric' to follow the arguments (float if any float). */
+    /** A fixed type or 'numeric' to follow the arguments (float if any float). */
     result: string;
 }
 
@@ -608,7 +608,7 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
             ctx._op.text, false);
 
     private comparison(ctx: ParserRuleContext, l: string | null,
-                       r: string | null, op: string, ordered: boolean): string {
+                       r: string | null, op: string ordered: boolean): string {
         if (l === 'error' || r === 'error') return 'error';
         if (l === 'any' || r === 'any') return 'boolean';
         const ok = l !== null && r !== null
@@ -647,7 +647,7 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     visitStringExpr = (_ctx: StringExprContext): string => 'string';
     visitBoolExpr = (_ctx: BoolExprContext): string => 'boolean';
     // input() is dynamically typed: the runtime coerces "12" to an integer,
-    // "true" to a boolean, and anything else to a string. Reporting it as a
+    // "true" to a boolean and anything else to a string. Reporting it as a
     // fixed type would make every realistic use of it a type error.
     visitInputExpr = (_ctx: InputExprContext): string => 'any';
     // ask prints its prompt, then reads a line exactly like input().
