@@ -9,7 +9,7 @@ import VoixHi from "./components/VoxHi.js";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <div className="bg-red-500/5 relative">
+    <div className="relative h-full">
       <VoixHi/>
       <BrowserRouter>
         <Routes>

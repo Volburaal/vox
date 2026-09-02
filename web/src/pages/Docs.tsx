@@ -113,7 +113,7 @@ export default function Docs() {
           <h1 className="text-4xl font-bold tracking-tight text-neon-red-soft glow-red sm:text-5xl">
             Documentation
           </h1>
-          <p className="mt-4 max-w-2xl text-lg text-fog">
+          {/* <p className="mt-4 max-w-2xl text-lg text-fog">
             Every feature of the language, with a program you can run and the
             output it produced.
           </p>
@@ -133,7 +133,7 @@ export default function Docs() {
               against the output shown here. If the language changes, this page
               fails the build.
             </p>
-          </div>
+          </div> */}
 
           <div className="mt-6 flex flex-wrap gap-3">
             <Link to="/playground" className="btn-red">
