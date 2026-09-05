@@ -1,0 +1,17 @@
+main {
+    string[] crew <- ["ann", "bob", "cy"];
+
+    say crew[0];                          // subscripts count from zero
+    say 1st item of crew;                 // ordinals count from one: the same item
+    say 3rd item of crew;
+
+    crew[1] <- "bea";
+    set the 3rd item of crew to "cyd";
+    say crew;
+
+    integer[] tally <- [1, 1, 1];
+    tally[0]++;                           // every update works on an item
+    add 5 to tally[1];
+    double the 3rd item of tally;
+    say tally;
+}

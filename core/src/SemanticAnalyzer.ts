@@ -1,23 +1,29 @@
-import { ParserRuleContext } from 'antlr4';
+import { ParserRuleContext, TerminalNode } from 'antlr4';
 import VoxVisitor from './gen/VoxVisitor.js';
 import {
     ProgramContext, PrototypeContext, DefinitionContext, MainFunctionContext,
-    BlockContext, ParameterListContext, ReturnTypeContext, DeclForwardContext,
-    DeclReverseContext, AssignForwardContext, AssignReverseContext,
+    BlockContext, ParameterListContext, ReturnTypeContext, DatatypeContext,
+    ListTypeContext, DeclForwardContext, DeclReverseContext, DeclLetContext,
+    DeclSizedContext, DeclListIsContext, AssignForwardContext,
+    AssignReverseContext, SetToContext, SwapStmtContext, TargetContext,
+    NameTargetContext, IndexTargetContext, OrdinalTargetContext,
     IfStatementContext, WhileLoopContext, ForLoopContext, RangeLoopContext,
-    RepeatTimesContext, RepeatUntilContext, SwapStmtContext, DeclLetContext,
-    SetToContext, AskExprContext, PredicateExprContext, DivisibleExprContext,
-    BetweenExprContext,
+    ForEachLoopContext, RepeatTimesContext, RepeatUntilContext,
     BreakStmtContext, ContinueStmtContext, ExprStmtContext, IncStmtContext,
     DecStmtContext, OpAssignContext, IncreaseByContext, DecreaseByContext,
     AddToContext, TakeFromContext, MultiplyByContext, DivideByContext,
-    DoubleStmtContext, HalveStmtContext, ExpressionContext, ParenExprContext,
-    CastExprContext, BuiltinExprContext, BuiltinNameContext, NegExprContext,
-    SquaredExprContext, NotExprContext, PowExprContext, MulExprContext, AddExprContext,
-    SubFromExprContext, RelExprContext, EqExprContext, AndExprContext,
-    OrExprContext, IdExprContext, IntExprContext, FloatExprContext,
-    StringExprContext, BoolExprContext, InputExprContext, CallExprContext,
-    FunctionCallContext, PrintStatementContext, ReturnStatementContext,
+    DoubleStmtContext, HalveStmtContext, PushToContext, InsertIntoContext,
+    PushCallContext, InsertCallContext, PopCallContext,
+    ExpressionContext, ParenExprContext, IndexExprContext, CastExprContext,
+    BuiltinExprContext, BuiltinNameContext, OrdinalExprContext, PopExprContext,
+    AskExprContext, NegExprContext, SquaredExprContext, NotExprContext,
+    PowExprContext, MulExprContext, AddExprContext, SubFromExprContext,
+    PredicateExprContext, DivisibleExprContext, BetweenExprContext,
+    InExprContext, ContainsExprContext, RelExprContext, EqExprContext,
+    AndExprContext, OrExprContext, IdExprContext, IntExprContext,
+    FloatExprContext, StringExprContext, BoolExprContext, ListExprContext,
+    InputExprContext, CallExprContext, FunctionCallContext,
+    PrintStatementContext, ReturnStatementContext,
 } from './gen/VoxParser.js';
 import VoxParser from './gen/VoxParser.js';
 import { Diagnostic, diagnosticFor, formatDiagnostic } from './diagnostics.js';
@@ -28,10 +34,10 @@ interface Signature {
     paramTypes: string[];
 }
 
-/** What a builtin accepts ('num' or 'string' per parameter) and returns. */
+/** What a builtin accepts per parameter, and what it returns. */
 interface BuiltinSpec {
-    params: ('num' | 'string')[];
-    /** A fixed type or 'numeric' to follow the arguments (float if any float). */
+    params: ('num' | 'string' | 'sized' | 'list')[];
+    /** A fixed type, 'numeric' (float if any float) or 'same' (the argument's type). */
     result: string;
 }
 
@@ -48,9 +54,10 @@ export const BUILTINS: ReadonlyMap<string, BuiltinSpec> = new Map<string, Builti
     ['ceiling',   { params: ['num'],        result: 'integer' }],
     ['min',       { params: ['num', 'num'], result: 'numeric' }],
     ['max',       { params: ['num', 'num'], result: 'numeric' }],
-    ['length',    { params: ['string'],     result: 'integer' }],
+    ['length',    { params: ['sized'],      result: 'integer' }],
     ['uppercase', { params: ['string'],     result: 'string' }],
     ['lowercase', { params: ['string'],     result: 'string' }],
+    ['copy',      { params: ['list'],       result: 'same' }],
 ]);
 
 /** Maps a spoken builtin token onto its symbolic name. */
@@ -61,6 +68,7 @@ export function builtinNameOf(ctx: BuiltinNameContext): string {
     if (ctx.FLOOR_OF()) return 'floor';
     if (ctx.CEIL_OF()) return 'ceiling';
     if (ctx.UPPER_OF()) return 'uppercase';
+    if (ctx.COPY_OF()) return 'copy';
     return 'lowercase';
 }
 
@@ -68,6 +76,9 @@ export function builtinNameOf(ctx: BuiltinNameContext): string {
  * Name resolution and type checking. A direct port of the Java
  * SemanticAnalyzer; diagnostic messages are kept byte-for-byte identical so
  * the shared regression suite can assert on them for both engines.
+ *
+ * Types are strings: the five scalars, `list of <type>` (nesting freely),
+ * 'any' for values only known at run time (input), 'void' and 'error'.
  */
 export class SemanticAnalyzer extends VoxVisitor<string | null> {
     private readonly functions = new Map<string, Signature>();
@@ -102,7 +113,6 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     private enterScope(): void { this.scopes.push(new Map()); }
     private exitScope(): void { this.scopes.pop(); }
 
-    /** Declared in the innermost scope only, so shadowing an outer name is legal. */
     private declaredHere(name: string): boolean {
         return this.scopes.length > 0 && this.scopes[this.scopes.length - 1].has(name);
     }
@@ -121,6 +131,22 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
 
     private define(name: string, type: string): void {
         if (this.scopes.length > 0) this.scopes[this.scopes.length - 1].set(name, type);
+    }
+
+    /**
+     * Declares a variable. A name cannot be reused while one is visible - in
+     * this scope or any enclosing one - so no variable is ever shadowed.
+     */
+    private declareVariable(ctx: ParserRuleContext, name: string,
+                            type: string, valueType: string | null): void {
+        if (this.declaredHere(name)) {
+            this.error(ctx, `variable '${name}' is already declared in this scope`);
+        } else if (this.isVisible(name)) {
+            this.error(ctx, `variable '${name}' is already declared in an enclosing scope`);
+        } else {
+            this.define(name, type);
+        }
+        if (valueType !== null) this.checkAssignable(ctx, type, valueType, name);
     }
 
     // ------------------------------------------------------------ program --
@@ -176,11 +202,11 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
                 if (this.declaredHere(pname)) {
                     this.error(p, `duplicate parameter '${pname}'`);
                 } else {
-                    this.define(pname, canonical(p.datatype().getText()));
+                    this.define(pname, typeName(p.datatype()));
                 }
             }
         }
-        // The body's own scope, so a local may shadow a parameter.
+        // The body's own scope; its locals cannot reuse a parameter's name.
         this.visit(ctx.block());
         this.exitScope();
         this.currentFunction = null;
@@ -204,164 +230,348 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     // -------------------------------------------------------- declarations --
 
     visitDeclForward = (ctx: DeclForwardContext): null => {
-        const declared = ctx.datatype().getText();
-        const name = ctx.ID().getText();
         const valueType = ctx.expression() ? this.visit(ctx.expression()) : null;
-        this.declareVariable(ctx, name, declared, valueType);
+        this.declareVariable(ctx, ctx.ID().getText(), typeName(ctx.datatype()), valueType);
         return null;
     };
 
     visitDeclReverse = (ctx: DeclReverseContext): null => {
         const valueType = this.visit(ctx.expression());
-        this.declareVariable(ctx, ctx.ID().getText(), ctx.datatype().getText(), valueType);
+        this.declareVariable(ctx, ctx.ID().getText(), typeName(ctx.datatype()), valueType);
         return null;
     };
 
     /** `let x be 5` declares x with the type of its value. */
     visitDeclLet = (ctx: DeclLetContext): null => {
-        const valueType = this.visit(ctx.expression());
-        const name = ctx.ID().getText();
-        if (this.declaredHere(name)) {
-            this.error(ctx, `variable '${name}' is already declared in this scope`);
-        } else {
-            this.define(name, valueType === null || valueType === 'error' ? 'any' : valueType);
+        let valueType = this.visit(ctx.expression());
+        if (valueType === listOf('any')) {
+            this.error(ctx, 'the type of [] cannot be inferred; declare the list with a type instead');
         }
+        if (valueType === null || valueType === 'error') valueType = 'any';
+        this.declareVariable(ctx, ctx.ID().getText(), valueType, null);
         return null;
     };
 
-    private declareVariable(ctx: ParserRuleContext, name: string,
-                            declaredType: string, valueType: string | null): void {
-        if (this.declaredHere(name)) {
-            this.error(ctx, `variable '${name}' is already declared in this scope`);
-        } else {
-            this.define(name, canonical(declaredType));
+    /** `integer xs[5]`: a list of that many defaults; `integer xs[]`: empty. */
+    visitDeclSized = (ctx: DeclSizedContext): null => {
+        const type = listOf(typeName(ctx.datatype()));
+        if (ctx._size) {
+            const sizeType = this.visit(ctx._size);
+            if (sizeType !== null && sizeType !== 'error' && sizeType !== 'any' && sizeType !== 'integer') {
+                this.error(ctx._size, `list size must be an integer but got ${sizeType}`);
+            }
         }
-        if (valueType !== null) {
-            this.checkAssignable(ctx, canonical(declaredType), valueType, name);
+        const valueType = ctx._init ? this.visit(ctx._init) : null;
+        if (ctx._size && ctx._init) {
+            this.error(ctx, 'give a list a size or an initial value, not both');
         }
-    }
+        this.declareVariable(ctx, ctx.ID().getText(), type, valueType);
+        return null;
+    };
+
+    /** `xs is a list of integers`. */
+    visitDeclListIs = (ctx: DeclListIsContext): null => {
+        const type = listOf(typeName(ctx.datatype()));
+        const valueType = ctx._init ? this.visit(ctx._init) : null;
+        this.declareVariable(ctx, ctx.ID().getText(), type, valueType);
+        return null;
+    };
 
     // --------------------------------------------------------- assignments --
 
     visitAssignForward = (ctx: AssignForwardContext): null => {
         const valueType = this.visit(ctx.expression());
-        this.checkAssignTarget(ctx, ctx.ID().getText(), valueType);
+        this.checkAssignTarget(ctx, ctx.target(), valueType);
         return null;
     };
 
     visitAssignReverse = (ctx: AssignReverseContext): null => {
         const valueType = this.visit(ctx.expression());
-        this.checkAssignTarget(ctx, ctx.ID().getText(), valueType);
+        this.checkAssignTarget(ctx, ctx.target(), valueType);
         return null;
     };
 
     visitSetTo = (ctx: SetToContext): null => {
         const valueType = this.visit(ctx.expression());
-        this.checkAssignTarget(ctx, ctx.ID().getText(), valueType);
+        this.checkAssignTarget(ctx, ctx.target(), valueType);
         return null;
     };
 
-    /** Each value must fit the other variable's declared type. */
-    visitSwapStmt = (ctx: SwapStmtContext): null => {
-        const a = ctx.ID(0).getText();
-        const b = ctx.ID(1).getText();
-        let missing = false;
-        for (const name of [a, b]) {
-            if (!this.isVisible(name)) {
-                this.error(ctx, `variable '${name}' is not declared`);
-                missing = true;
-            }
-        }
-        if (missing) return null;
-        this.checkAssignable(ctx, this.typeOf(a), this.typeOf(b), a);
-        this.checkAssignable(ctx, this.typeOf(b), this.typeOf(a), b);
-        return null;
-    };
-
-    private checkAssignTarget(ctx: ParserRuleContext, name: string,
+    private checkAssignTarget(ctx: ParserRuleContext, target: TargetContext,
                               valueType: string | null): void {
-        if (!this.isVisible(name)) {
-            this.error(ctx, `variable '${name}' is not declared`);
+        const targetType = this.typeOfTarget(target);
+        if (targetType === null) return; // already reported
+        this.checkAssignable(ctx, targetType, valueType, target.getText());
+    }
+
+    /**
+     * The type a target holds: a variable's declared type, or a list's item
+     * type for `xs[i]` and `2nd item of xs`. Null once a problem is reported.
+     */
+    private typeOfTarget(target: TargetContext): string | null {
+        if (target instanceof NameTargetContext) {
+            const name = target.ID().getText();
+            if (!this.isVisible(name)) {
+                this.error(target, `variable '${name}' is not declared`);
+                return null;
+            }
+            return this.typeOf(name);
+        }
+        if (target instanceof IndexTargetContext) {
+            const base = this.typeOfTarget(target.target());
+            this.requireIndex(target.expression(), this.visit(target.expression()));
+            return this.itemTypeOf(target, base);
+        }
+        const ordinal = target as OrdinalTargetContext;
+        this.checkOrdinal(ordinal, ordinal.ORDINAL());
+        return this.itemTypeOf(ordinal, this.typeOfTarget(ordinal.target()));
+    }
+
+    /** The item type of a list type; reports when the base is not a list. */
+    private itemTypeOf(ctx: ParserRuleContext, base: string | null): string | null {
+        if (base === null || base === 'error') return null;
+        if (base === 'any') return 'any';
+        if (!isList(base)) {
+            this.error(ctx, `cannot index ${base}; only lists have items`);
+            return null;
+        }
+        return elementOf(base);
+    }
+
+    private requireIndex(ctx: ParserRuleContext, t: string | null): void {
+        if (t === null || t === 'error' || t === 'any' || t === 'integer') return;
+        this.error(ctx, `index must be an integer but got ${t}`);
+    }
+
+    /** `1st`, `2nd`, `3rd`, `4th`...: the suffix must be the English one. */
+    private checkOrdinal(ctx: ParserRuleContext, token: TerminalNode): void {
+        const text = token.getText();
+        const n = Number(text.replace(/[a-z]+$/, ''));
+        if (n === 0) {
+            this.error(ctx, 'there is no 0th item; the first is the 1st, or index 0');
             return;
         }
-        this.checkAssignable(ctx, this.typeOf(name), valueType, name);
+        const want = ordinalSuffix(n);
+        if (!text.endsWith(want)) {
+            this.error(ctx, `'${text}' should be '${n}${want}'`);
+        }
     }
 
     /** Reports a narrowing or otherwise lossy assignment as a warning, not an error. */
     private checkAssignable(ctx: ParserRuleContext, target: string | null,
                             value: string | null, name: string): void {
         if (target === null || value === null) return;
-        if (value === 'error' || target === value) return;
-        // input() is dynamic: the runtime coerces it to whatever fits.
-        if (value === 'any' || target === 'any') return;
-
-        if (isNumeric(target) && isNumeric(value)) {
-            if (target === 'integer' && value === 'float') {
+        switch (fits(target, value)) {
+            case 'ok': return;
+            case 'narrow':
                 this.warn(ctx, `implicit cast float -> integer assigning to '${name}' loses precision`);
-            }
-            return; // integer -> float widens silently
+                return;
+            default:
+                this.error(ctx, `cannot assign ${value} to ${target} '${name}'`);
         }
-        this.error(ctx, `cannot assign ${value} to ${target} '${name}'`);
     }
+
+    /** Each value must fit the other variable's declared type. */
+    visitSwapStmt = (ctx: SwapStmtContext): null => {
+        const a = ctx.target(0);
+        const b = ctx.target(1);
+        const ta = this.typeOfTarget(a);
+        const tb = this.typeOfTarget(b);
+        if (ta === null || tb === null) return null;
+        this.checkAssignable(ctx, ta, tb, a.getText());
+        this.checkAssignable(ctx, tb, ta, b.getText());
+        return null;
+    };
 
     // ------------------------------------------------------------ updates --
     // Every spoken form is checked as its symbolic twin: `add 3 to n` is `n += 3`.
 
     visitIncStmt = (ctx: IncStmtContext): null =>
-        this.checkUpdate(ctx, ctx.ID().getText(), '++', 'integer');
+        this.checkUpdate(ctx, ctx.target(), '++', 'integer');
 
     visitDecStmt = (ctx: DecStmtContext): null =>
-        this.checkUpdate(ctx, ctx.ID().getText(), '--', 'integer');
+        this.checkUpdate(ctx, ctx.target(), '--', 'integer');
 
     visitOpAssign = (ctx: OpAssignContext): null =>
-        this.checkUpdate(ctx, ctx.ID().getText(), ctx._op.text!, this.visit(ctx.expression()));
+        this.checkUpdate(ctx, ctx.target(), ctx._op.text!, this.visit(ctx.expression()));
 
     visitIncreaseBy = (ctx: IncreaseByContext): null =>
-        this.checkUpdate(ctx, ctx.ID().getText(), '+=', this.visit(ctx.expression()));
+        this.checkUpdate(ctx, ctx.target(), '+=', this.visit(ctx.expression()));
 
     visitDecreaseBy = (ctx: DecreaseByContext): null =>
-        this.checkUpdate(ctx, ctx.ID().getText(), '-=', this.visit(ctx.expression()));
+        this.checkUpdate(ctx, ctx.target(), '-=', this.visit(ctx.expression()));
 
     visitAddTo = (ctx: AddToContext): null =>
-        this.checkUpdate(ctx, ctx.ID().getText(), '+=', this.visit(ctx.expression()));
+        this.checkUpdate(ctx, ctx.target(), '+=', this.visit(ctx.expression()));
 
     visitTakeFrom = (ctx: TakeFromContext): null =>
-        this.checkUpdate(ctx, ctx.ID().getText(), '-=', this.visit(ctx.expression()));
+        this.checkUpdate(ctx, ctx.target(), '-=', this.visit(ctx.expression()));
 
     visitMultiplyBy = (ctx: MultiplyByContext): null =>
-        this.checkUpdate(ctx, ctx.ID().getText(), '*=', this.visit(ctx.expression()));
+        this.checkUpdate(ctx, ctx.target(), '*=', this.visit(ctx.expression()));
 
     visitDivideBy = (ctx: DivideByContext): null =>
-        this.checkUpdate(ctx, ctx.ID().getText(), '/=', this.visit(ctx.expression()));
+        this.checkUpdate(ctx, ctx.target(), '/=', this.visit(ctx.expression()));
 
     visitDoubleStmt = (ctx: DoubleStmtContext): null =>
-        this.checkUpdate(ctx, ctx.ID().getText(), 'double', 'integer');
+        this.checkUpdate(ctx, ctx.target(), 'double', 'integer');
 
     visitHalveStmt = (ctx: HalveStmtContext): null =>
-        this.checkUpdate(ctx, ctx.ID().getText(), 'halve', 'integer');
+        this.checkUpdate(ctx, ctx.target(), 'halve', 'integer');
 
-    /** `name op= value` is checked exactly like `name = name op value`. */
-    private checkUpdate(ctx: ParserRuleContext, name: string, op: string,
+    /** `x op= value` is checked exactly like `x = x op value`. */
+    private checkUpdate(ctx: ParserRuleContext, target: TargetContext, op: string,
                         valueType: string | null): null {
-        if (!this.isVisible(name)) {
-            this.error(ctx, `variable '${name}' is not declared`);
-            return null;
-        }
-        const target = this.typeOf(name)!;
+        const targetType = this.typeOfTarget(target);
+        if (targetType === null) return null;
+        const name = target.getText();
         let result: string;
         if (op === '++' || op === '--' || op === 'double' || op === 'halve') {
-            if (!isNumeric(target)) {
-                this.error(ctx, `operator '${op}' cannot be applied to ${target}`);
+            if (!isNumeric(targetType)) {
+                this.error(ctx, `operator '${op}' cannot be applied to ${targetType}`);
                 return null;
             }
-            result = target;
-        } else if (op === '+=' && (target === 'string' || valueType === 'string')) {
+            result = targetType;
+        } else if (op === '+=' && isList(targetType)) {
+            this.error(ctx, `to add an item to a list, use 'push ... to ${name}'`);
+            return null;
+        } else if (op === '+=' && (targetType === 'string' || valueType === 'string')) {
             result = 'string'; // '+' doubles as string concatenation
         } else {
-            result = this.arithmetic(ctx, target, valueType, op);
+            result = this.arithmetic(ctx, targetType, valueType, op);
         }
-        this.checkAssignable(ctx, target, result, name);
+        this.checkAssignable(ctx, targetType, result, name);
         return null;
+    }
+
+    // -------------------------------------------------------------- lists --
+
+    visitPushTo = (ctx: PushToContext): null => {
+        const valueType = this.visit(ctx.expression(0));
+        const listType = this.visit(ctx.expression(1));
+        if (ctx.AT()) this.requireIndex(ctx.expression(2), this.visit(ctx.expression(2)));
+        this.checkListOp(ctx, 'push', listType, valueType);
+        return null;
+    };
+
+    visitInsertInto = (ctx: InsertIntoContext): null => {
+        const valueType = this.visit(ctx.expression(0));
+        const listType = this.visit(ctx.expression(1));
+        this.requireIndex(ctx.expression(2), this.visit(ctx.expression(2)));
+        this.checkListOp(ctx, 'insert', listType, valueType);
+        return null;
+    };
+
+    /** push(xs, v) and insert(xs, i, v): the call spellings of the statements above. */
+    visitPushCall = (ctx: PushCallContext): null => {
+        const listType = this.visit(ctx.expression(0));
+        const valueType = this.visit(ctx.expression(1));
+        this.checkListOp(ctx, 'push', listType, valueType);
+        return null;
+    };
+
+    visitInsertCall = (ctx: InsertCallContext): null => {
+        const listType = this.visit(ctx.expression(0));
+        this.requireIndex(ctx.expression(1), this.visit(ctx.expression(1)));
+        const valueType = this.visit(ctx.expression(2));
+        this.checkListOp(ctx, 'insert', listType, valueType);
+        return null;
+    };
+
+    /** The list operand must be a list, and the value must fit its items. */
+    private checkListOp(ctx: ParserRuleContext, op: string,
+                        listType: string | null, valueType: string | null): void {
+        if (listType === null || listType === 'error' || listType === 'any') return;
+        if (!isList(listType)) {
+            this.error(ctx, `'${op}' needs a list but got ${listType}`);
+            return;
+        }
+        if (valueType !== null && fits(elementOf(listType), valueType) !== 'ok') {
+            this.error(ctx, `cannot ${op} ${valueType} into ${listType}`);
+        }
+    }
+
+    visitPopExpr = (ctx: PopExprContext): string => {
+        const listType = this.visit(ctx.expression(0));
+        if (ctx.AT()) this.requireIndex(ctx.expression(1), this.visit(ctx.expression(1)));
+        return this.popResult(ctx, listType);
+    };
+
+    /** pop(xs) and pop(xs, i): the call spelling. */
+    visitPopCall = (ctx: PopCallContext): string => {
+        const listType = this.visit(ctx.expression(0));
+        if (ctx.expression_list().length > 1) {
+            this.requireIndex(ctx.expression(1), this.visit(ctx.expression(1)));
+        }
+        return this.popResult(ctx, listType);
+    };
+
+    private popResult(ctx: ParserRuleContext, listType: string | null): string {
+        if (listType === null || listType === 'error') return 'error';
+        if (listType === 'any') return 'any';
+        if (!isList(listType)) {
+            this.error(ctx, `'pop' needs a list but got ${listType}`);
+            return 'error';
+        }
+        return elementOf(listType);
+    }
+
+    visitIndexExpr = (ctx: IndexExprContext): string => {
+        const base = this.visit(ctx.expression(0));
+        this.requireIndex(ctx.expression(1), this.visit(ctx.expression(1)));
+        return this.itemTypeOf(ctx, base) ?? 'error';
+    };
+
+    visitOrdinalExpr = (ctx: OrdinalExprContext): string => {
+        this.checkOrdinal(ctx, ctx.ORDINAL());
+        return this.itemTypeOf(ctx, this.visit(ctx.expression())) ?? 'error';
+    };
+
+    /** `[1, 2, 3]` is a list of integer; `[]` is a list of any until it is given a type. */
+    visitListExpr = (ctx: ListExprContext): string => {
+        let element: string | null = null;
+        for (const e of ctx.expression_list()) {
+            const t = this.visit(e);
+            if (t === null || t === 'error') return 'error';
+            if (t === 'any') continue;
+            if (element === null || t === element) {
+                element = t;
+            } else if (fits(element, t) === 'ok' && fits(t, element) === 'ok') {
+                // `[[], [1]]`: an empty inner list takes the type of a full one.
+                if (element.includes('any')) element = t;
+            } else {
+                this.error(e, `list items must all have the same type; got ${element} and ${t}`);
+                return 'error';
+            }
+        }
+        return listOf(element ?? 'any');
+    };
+
+    visitInExpr = (ctx: InExprContext): string => {
+        const valueType = this.visit(ctx.expression(0));
+        const listType = this.visit(ctx.expression(1));
+        this.checkContains(ctx, ctx._op.type === VoxParser.NE ? 'is not in' : 'is in', listType, valueType);
+        return 'boolean';
+    };
+
+    visitContainsExpr = (ctx: ContainsExprContext): string => {
+        const listType = this.visit(ctx.expression(0));
+        const valueType = this.visit(ctx.expression(1));
+        this.checkContains(ctx, 'contains', listType, valueType);
+        return 'boolean';
+    };
+
+    private checkContains(ctx: ParserRuleContext, op: string,
+                          listType: string | null, valueType: string | null): void {
+        if (listType === null || listType === 'error' || listType === 'any') return;
+        if (!isList(listType)) {
+            this.error(ctx, `operator '${op}' needs a list but got ${listType}`);
+            return;
+        }
+        if (valueType !== null && valueType !== 'error' && valueType !== 'any'
+            && fits(elementOf(listType), valueType) === 'no') {
+            this.error(ctx, `operator '${op}' cannot look for ${valueType} in ${listType}`);
+        }
     }
 
     // ------------------------------------------------------------ control --
@@ -398,9 +608,8 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     visitRangeLoop = (ctx: RangeLoopContext): null => {
         const rc = ctx.rangeClause();
         const name = rc.ID().getText();
-        const varType = rc.datatype() ? canonical(rc.datatype()!.getText()) : 'integer';
-        // The bounds are evaluated before the loop variable exists, so
-        // `for i from i to 10` refers to an outer i.
+        const varType = rc.datatype() ? typeName(rc.datatype()!) : 'integer';
+        // The bounds are evaluated before the loop variable exists.
         const startType = this.visit(rc._start);
         const limitType = this.visit(rc._limit);
         const stepType = rc._step ? this.visit(rc._step) : null;
@@ -420,11 +629,39 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
 
         // The loop variable belongs to a scope enclosing the body.
         this.enterScope();
-        this.define(name, varType);
+        this.declareVariable(rc, name, varType, null);
         if (isNumeric(varType)) {
             this.checkAssignable(rc, varType, startType, name);
             if (rc._step) this.checkAssignable(rc._step, varType, stepType, name);
         }
+        this.loopDepth++;
+        this.visit(ctx.block());
+        this.loopDepth--;
+        this.exitScope();
+        return null;
+    };
+
+    /** `for each x in xs`: x is a fresh variable holding a copy of each item. */
+    visitForEachLoop = (ctx: ForEachLoopContext): null => {
+        const listType = this.visit(ctx.expression());
+        let element = 'any';
+        if (listType !== null && listType !== 'error' && listType !== 'any') {
+            if (isList(listType)) {
+                element = elementOf(listType);
+            } else {
+                this.error(ctx.expression(), `for each needs a list but got ${listType}`);
+            }
+        }
+
+        const name = ctx.ID().getText();
+        const declared = ctx.datatype();
+        const varType = declared ? typeName(declared) : element;
+        if (declared && element !== 'any' && fits(varType, element) !== 'ok') {
+            this.error(declared, `loop variable '${name}' is ${varType} but the list holds ${element}`);
+        }
+
+        this.enterScope();
+        this.declareVariable(ctx, name, varType, null);
         this.loopDepth++;
         this.visit(ctx.block());
         this.loopDepth--;
@@ -478,7 +715,8 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         // because in a spoken language it reads like an assignment.
         if (e instanceof EqExprContext) {
             this.warn(e, "comparison has no effect; to assign, use 'set ... to', '<-' or '='");
-        } else if (!(e instanceof CallExprContext) && !(e instanceof InputExprContext)) {
+        } else if (!(e instanceof CallExprContext) && !(e instanceof InputExprContext)
+            && !(e instanceof PopExprContext) && !(e instanceof PopCallContext)) {
             this.warn(e, 'expression has no effect');
         }
         return null;
@@ -486,8 +724,8 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
 
     private requireCondition(ctx: ExpressionContext): void {
         const t = this.visit(ctx);
-        if (t === 'string') {
-            this.warn(ctx, 'condition has type string; it is true when non-empty');
+        if (t === 'string' || (t !== null && isList(t))) {
+            this.warn(ctx, `condition has type ${t}; it is true when non-empty`);
         }
     }
 
@@ -497,8 +735,17 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
 
     visitCastExpr = (ctx: CastExprContext): string => {
         const source = this.visit(ctx.expression());
-        const target = canonical(ctx.datatype().getText());
-        return source === 'error' ? 'error' : target;
+        const target = typeName(ctx.datatype());
+        if (source === 'error') return 'error';
+        if (isList(target)) {
+            this.error(ctx, `cannot convert to ${target}`);
+            return 'error';
+        }
+        if (source !== null && isList(source) && target !== 'string') {
+            this.error(ctx, `cannot convert ${source} to ${target}`);
+            return 'error';
+        }
+        return target;
     };
 
     visitBuiltinExpr = (ctx: BuiltinExprContext): string => {
@@ -532,7 +779,7 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
 
     visitMulExpr = (ctx: MulExprContext): string =>
         this.arithmetic(ctx, this.visit(ctx.expression(0)), this.visit(ctx.expression(1)),
-            ctx._op.text);
+            ctx._op.text!);
 
     visitAddExpr = (ctx: AddExprContext): string => {
         const l = this.visit(ctx.expression(0));
@@ -540,12 +787,23 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         const isAdd = ctx._op.type === VoxParser.ADD;
         // '+' doubles as string concatenation.
         if (isAdd && (l === 'string' || r === 'string')) return 'string';
-        return this.arithmetic(ctx, l, r, ctx._op.text);
+        return this.arithmetic(ctx, l, r, ctx._op.text!);
     };
 
     visitSubFromExpr = (ctx: SubFromExprContext): string =>
         this.arithmetic(ctx, this.visit(ctx.expression(0)), this.visit(ctx.expression(1)),
             'subtracted from');
+
+    private arithmetic(ctx: ParserRuleContext, l: string | null,
+                       r: string | null, op: string): string {
+        if (l === 'error' || r === 'error') return 'error';
+        if (l === 'any' || r === 'any') return 'any';
+        if (l !== null && r !== null && isNumeric(l) && isNumeric(r)) {
+            return l === 'float' || r === 'float' ? 'float' : 'integer';
+        }
+        this.error(ctx, `operator '${op}' cannot be applied to ${l} and ${r}`);
+        return 'error';
+    }
 
     // ---- predicates: `is even`, `is not positive`, `is divisible by`, ... ----
 
@@ -554,7 +812,7 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         if (t !== null && t !== 'error' && t !== 'any') {
             const pred = ctx._pred.type;
             const ok = pred === VoxParser.EMPTY
-                ? t === 'string' || t === 'character'
+                ? t === 'string' || t === 'character' || isList(t)
                 : pred === VoxParser.EVEN || pred === VoxParser.ODD
                     ? t === 'integer'
                     : isNumeric(t);
@@ -588,24 +846,13 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         return 'boolean';
     };
 
-    private arithmetic(ctx: ParserRuleContext, l: string | null,
-                       r: string | null, op: string): string {
-        if (l === 'error' || r === 'error') return 'error';
-        if (l === 'any' || r === 'any') return 'any';
-        if (l !== null && r !== null && isNumeric(l) && isNumeric(r)) {
-            return l === 'float' || r === 'float' ? 'float' : 'integer';
-        }
-        this.error(ctx, `operator '${op}' cannot be applied to ${l} and ${r}`);
-        return 'error';
-    }
-
     visitRelExpr = (ctx: RelExprContext): string =>
         this.comparison(ctx, this.visit(ctx.expression(0)), this.visit(ctx.expression(1)),
-            ctx._op.text, true);
+            ctx._op.text!, true);
 
     visitEqExpr = (ctx: EqExprContext): string =>
         this.comparison(ctx, this.visit(ctx.expression(0)), this.visit(ctx.expression(1)),
-            ctx._op.text, false);
+            ctx._op.text!, false);
 
     private comparison(ctx: ParserRuleContext, l: string | null,
                        r: string | null, op: string, ordered: boolean): string {
@@ -613,7 +860,7 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         if (l === 'any' || r === 'any') return 'boolean';
         const ok = l !== null && r !== null
             && ((isNumeric(l) && isNumeric(r))
-                || (l === r && (!ordered || l !== 'boolean')));
+                || (l === r && (!ordered || (l !== 'boolean' && !isList(l)))));
         if (!ok) {
             this.error(ctx, `operator '${op}' cannot compare ${l} and ${r}`);
             return 'error';
@@ -647,7 +894,7 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     visitStringExpr = (_ctx: StringExprContext): string => 'string';
     visitBoolExpr = (_ctx: BoolExprContext): string => 'boolean';
     // input() is dynamically typed: the runtime coerces "12" to an integer,
-    // "true" to a boolean and anything else to a string. Reporting it as a
+    // "true" to a boolean, and anything else to a string. Reporting it as a
     // fixed type would make every realistic use of it a type error.
     visitInputExpr = (_ctx: InputExprContext): string => 'any';
     // ask prints its prompt, then reads a line exactly like input().
@@ -685,15 +932,16 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         for (let i = 0; i < argTypes.length; i++) {
             const want = sig.paramTypes[i];
             const got = argTypes[i];
-            if (got === null || got === 'error' || got === 'any' || want === got) continue;
-            if (isNumeric(want) && isNumeric(got)) {
-                if (want === 'integer' && got === 'float') {
+            if (got === null) continue;
+            switch (fits(want, got)) {
+                case 'ok': break;
+                case 'narrow':
                     this.warn(ctx, `argument ${i + 1} of '${name}':`
                         + ' implicit cast float -> integer loses precision');
-                }
-                continue;
+                    break;
+                default:
+                    this.error(ctx, `argument ${i + 1} of '${name}' expects ${want} but got ${got}`);
             }
-            this.error(ctx, `argument ${i + 1} of '${name}' expects ${want} but got ${got}`);
         }
         return sig.returnType;
     };
@@ -703,6 +951,10 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
                          argTypes: (string | null)[]): string {
         const spec = BUILTINS.get(name)!;
         const result = (): string => {
+            if (spec.result === 'same') {
+                const t = argTypes[0];
+                return t === null || t === 'error' ? 'any' : t;
+            }
             if (spec.result !== 'numeric') return spec.result;
             if (argTypes.some(t => t === 'float')) return 'float';
             if (argTypes.some(t => t === 'any')) return 'any';
@@ -717,10 +969,15 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
             const got = argTypes[i];
             if (got === null || got === 'error' || got === 'any') continue;
             const kind = spec.params[i];
-            const ok = kind === 'num' ? isNumeric(got) : (got === 'string' || got === 'character');
+            const ok = kind === 'num' ? isNumeric(got)
+                : kind === 'string' ? (got === 'string' || got === 'character')
+                : kind === 'list' ? isList(got)
+                : (got === 'string' || got === 'character' || isList(got)); // sized
             if (!ok) {
-                this.error(ctx, `argument ${i + 1} of '${name}' expects `
-                    + (kind === 'num' ? 'a number' : 'string') + ` but got ${got}`);
+                const want = kind === 'num' ? 'a number'
+                    : kind === 'string' ? 'string'
+                    : kind === 'list' ? 'a list' : 'a string or a list';
+                this.error(ctx, `argument ${i + 1} of '${name}' expects ${want} but got ${got}`);
             }
         }
         return result();
@@ -746,21 +1003,66 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
             this.error(ctx, `function '${fn.name}' must return a value of type ${fn.returnType}`);
             return null;
         }
-        if (valueType === null || valueType === 'error' || valueType === 'any'
-            || valueType === fn.returnType) return null;
-        if (isNumeric(fn.returnType) && isNumeric(valueType)) {
-            if (fn.returnType === 'integer' && valueType === 'float') {
+        if (valueType === null) return null;
+        switch (fits(fn.returnType, valueType)) {
+            case 'ok': return null;
+            case 'narrow':
                 this.warn(ctx, `implicit cast float -> integer in return from '${fn.name}' loses precision`);
-            }
-            return null;
+                return null;
+            default:
+                this.error(ctx, `cannot return ${valueType} from function '${fn.name}' which returns ${fn.returnType}`);
+                return null;
         }
-        this.error(ctx, `cannot return ${valueType} from function '${fn.name}' which returns ${fn.returnType}`);
-        return null;
     };
 }
 
+// ---------------------------------------------------------------- types --
+
 function isNumeric(t: string): boolean {
     return t === 'integer' || t === 'float';
+}
+
+export function isList(t: string): boolean {
+    return t.startsWith('list of ');
+}
+
+export function listOf(element: string): string {
+    return 'list of ' + element;
+}
+
+export function elementOf(listType: string): string {
+    return listType.slice('list of '.length);
+}
+
+/**
+ * Whether a value of type `value` may be stored where `target` is expected:
+ * 'ok', 'narrow' (float into integer - legal with a warning) or 'no'. Lists
+ * must match item for item; only 'any' (an empty literal, or input) is a
+ * wildcard.
+ */
+export function fits(target: string, value: string): 'ok' | 'narrow' | 'no' {
+    if (value === 'error') return 'ok'; // already reported elsewhere
+    if (target === value) return 'ok';
+    if (target === 'any' || value === 'any') return 'ok';
+    if (isList(target) && isList(value)) {
+        return fits(elementOf(target), elementOf(value)) === 'ok' ? 'ok' : 'no';
+    }
+    if (isNumeric(target) && isNumeric(value)) {
+        return target === 'integer' && value === 'float' ? 'narrow' : 'ok';
+    }
+    return 'no';
+}
+
+/** The English suffix for an ordinal: 1st, 2nd, 3rd, 4th, 11th, 21st... */
+export function ordinalSuffix(n: number): string {
+    const tens = n % 100;
+    if (tens >= 11 && tens <= 13) return 'th';
+    switch (n % 10) {
+        case 1: return 'st';
+        case 2: return 'nd';
+        case 3: return 'rd';
+        default: return 'th';
+    }
 }
 
 /** 'is even' or 'is not even', regardless of how the operator was spelled. */
@@ -781,27 +1083,36 @@ function literalValue(e: ExpressionContext): number | null {
 
 function paramTypes(ctx: ParameterListContext | null): string[] {
     if (!ctx) return [];
-    return ctx.parameter_list().map(p => canonical(p.datatype().getText()));
+    return ctx.parameter_list().map(p => typeName(p.datatype()));
 }
 
-/** 'void' for procedures, otherwise the canonical datatype. */
+/** 'void' for procedures, otherwise the type written. */
 function returnTypeOf(ctx: ReturnTypeContext): string {
-    return ctx.VOID() ? 'void' : canonical(ctx.datatype().getText());
+    return ctx.VOID() ? 'void' : typeName(ctx.datatype());
 }
 
-/** Maps every spelling of a type onto one canonical name. */
+/** The type a `datatype` node spells: a scalar, or `list of <type>`. */
+export function typeName(ctx: DatatypeContext): string {
+    if (ctx instanceof ListTypeContext) return listOf(typeName(ctx.datatype()));
+    return canonical(ctx.getText());
+}
+
+/** Maps every spelling of a scalar type onto one canonical name. */
 export function canonical(written: string): string {
     const t = written.trim().replace(/\s+/g, ' ');
     switch (t) {
-        case 'int': case 'integer': case 'number': case 'whole number':
+        case 'int': case 'integer': case 'integers': case 'number': case 'numbers':
+        case 'whole number': case 'whole numbers':
             return 'integer';
-        case 'float': case 'floating point number':
+        case 'float': case 'floats': case 'floating point number': case 'floating point numbers':
             return 'float';
-        case 'bool': case 'boolean': case 'boolean number':
+        case 'bool': case 'bools': case 'boolean': case 'booleans':
+        case 'boolean number': case 'boolean numbers':
             return 'boolean';
-        case 'char': case 'character':
+        case 'char': case 'chars': case 'character': case 'characters':
             return 'character';
-        case 'string': case 'character string': case 'varchar':
+        case 'string': case 'strings': case 'character string': case 'character strings':
+        case 'varchar':
             return 'string';
         default:
             return t;

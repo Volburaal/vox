@@ -1,0 +1,20 @@
+main {
+    string[] playlist <- ["intro", "news", "weather"];
+
+    for each segment in playlist {
+        say "now: ", segment;
+    }
+
+    integer[] scores <- [72, 88, 64];
+    integer best <- 0;
+    for every score in scores {
+        if (score > best) { set best to score; }
+    }
+    say "best: ", best;
+
+    // The C++ spelling, if you prefer it.
+    for (integer s : scores) {
+        print(s, " ");
+    }
+    print('\n');
+}

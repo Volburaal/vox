@@ -6,6 +6,7 @@ import factorial from "../../examples/factorial.vox?raw";
 import fibonacci from "../../examples/fibonacci.vox?raw";
 import natural from "../../examples/natural.vox?raw";
 import counting from "../../examples/counting.vox?raw";
+import playlist from "../../examples/playlist.vox?raw";
 import voice from "../../examples/voice.vox?raw";
 
 export interface Example {
@@ -39,6 +40,12 @@ export const EXAMPLES: Example[] = [
     name: "Counting",
     blurb: "Range loops, countdowns and in-place updates.",
     source: counting,
+  },
+  {
+    id: "playlist",
+    name: "Playlist",
+    blurb: "Lists: push, pop, ordinals and for each.",
+    source: playlist,
   },
   {
     id: "factorial",

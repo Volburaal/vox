@@ -14,6 +14,7 @@ import { EditorView } from '@codemirror/view';
 const DECL_STARTERS = ['let there be an', 'let there be a', 'consider an', 'consider a', 'suppose an', 'suppose a'];
 const KEYWORD_PHRASES = [
   'some user input', 'a user input', 'after iteration', 'an input', 'in steps of', 'down to',
+  'is a list of', 'for every', 'for each', 'list of', 'item of', 'value of',
 ];
 const ASSIGN_PHRASES = ['which is equal to', 'which equals'];
 const TYPE_PHRASES = ['floating point number', 'character string', 'boolean number', 'whole number'];
@@ -27,7 +28,7 @@ const OPERATOR_PHRASES = [
 // Spoken forms of the builtin functions.
 const BUILTIN_PHRASES = [
   'absolute value of', 'square root of', 'uppercase of', 'lowercase of',
-  'ceiling of', 'length of', 'floor of',
+  'ceiling of', 'length of', 'floor of', 'copy of',
 ];
 
 export const PHRASES = [
@@ -47,8 +48,14 @@ export const KEYWORDS = new Set([
   // voice and textbook forms
   'set', 'let', 'be', 'swap', 'repeat',
   'even', 'odd', 'positive', 'negative', 'empty', 'divisible', 'between',
+  // lists
+  'list', 'in', 'at', 'push', 'insert', 'into', 'pop', 'contains',
 ]);
-export const TYPES = new Set(['int', 'integer', 'number', 'float', 'bool', 'boolean', 'character', 'char', 'string', 'varchar']);
+export const TYPES = new Set([
+  'int', 'integer', 'integers', 'number', 'numbers', 'float', 'floats',
+  'bool', 'bools', 'boolean', 'booleans', 'character', 'characters', 'char', 'chars',
+  'string', 'strings', 'varchar',
+]);
 export const WORD_OPERATORS = new Set([
   'is', 'equals', 'minus', 'plus', 'times', 'and', 'or', 'not', 'squared', 'cubed',
 ]);
@@ -90,6 +97,8 @@ export const voxLanguage = StreamLanguage.define<State>({
 
     if (stream.match(/^"(?:[^"\\]|\\.)*"?/)) return 'string';
     if (stream.match(/^'(?:[^'\\]|\\.)*'?/)) return 'string';
+    // Ordinals (`2nd`) before plain numbers, so the suffix is not read as a name.
+    if (stream.match(/^\d+(?:st|nd|rd|th)(?![A-Za-z0-9_])/)) return 'number';
     if (stream.match(/^\d+\.\d+/) || stream.match(/^\d+/)) return 'number';
 
     const phrase = stream.match(PHRASE_RE) as RegExpMatchArray | null;
@@ -98,7 +107,7 @@ export const voxLanguage = StreamLanguage.define<State>({
     }
 
     if (stream.match(SYMBOL_RE)) return 'operator';
-    if (stream.match(/^[(){};,:]/)) return 'punctuation';
+    if (stream.match(/^[(){}[\];,:]/)) return 'punctuation';
 
     const ident = stream.match(IDENT_RE) as RegExpMatchArray | null;
     if (ident) {

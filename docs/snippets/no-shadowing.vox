@@ -1,0 +1,6 @@
+main {
+    integer count <- 1;
+    if (true) {
+        integer count <- 2;               // count is still visible here
+    }
+}

@@ -139,8 +139,17 @@ export const CATEGORIES: DocCategory[] = [
         title: "Scope and call frames",
         body: [
           "Every call gets its own frame. Parameters and locals belong to that frame alone, so a function cannot reach into its caller and a recursive function has a fresh copy of each variable at every depth.",
+          "Inside a function, a name means one thing for as long as it is visible: a block cannot redeclare a variable that an enclosing block still holds, and a local cannot reuse a parameter's name. A name never quietly changes meaning between one line and the next.",
         ],
         snippet: "scope",
+      },
+      {
+        id: "no-shadowing",
+        title: "No shadowing",
+        body: [
+          "Redeclaring a name that is still visible is a compile error, whether the first declaration is in the same block or an enclosing one. Sibling blocks may reuse a name freely, since neither can see the other's.",
+        ],
+        snippet: "no-shadowing",
       },
     ],
   },
@@ -322,6 +331,83 @@ export const CATEGORIES: DocCategory[] = [
   },
 
   {
+    id: "lists",
+    title: "Lists",
+    intro: "Ordered, growable, and shared by reference.",
+    sections: [
+      {
+        id: "lists",
+        title: "Declaring lists",
+        body: [
+          "A list holds any number of values of one type. Spell the type whichever way you like - `list<integer>`, `integer[]`, `integer xs[]` or `a list of integers` - and give it items with a literal, a size, or nothing at all.",
+          "`integer xs[5]` starts with five defaults; `integer xs[]` and every other form start empty. Lists nest: `integer[][]` is a list of lists.",
+        ],
+        snippet: "lists",
+        notes: [
+          "`[]` takes its type from the declaration, so `let xs be [];` is an error: there is nothing to infer from.",
+          "Items in a literal must share one type; `[1, 2.5]` is rejected rather than silently widened.",
+        ],
+      },
+      {
+        id: "list-items",
+        title: "Items: subscripts and ordinals",
+        body: [
+          "`xs[i]` counts from zero, as subscripts do everywhere. The spoken form counts the way English does: `1st item of xs` is the first item, which is `xs[0]`. `2nd`, `3rd`, `4th` and so on follow, and the suffix is checked - `2th` is a compile error that tells you to write `2nd`.",
+          "Both forms are assignment targets, and every in-place update works on an item: `xs[i]++`, `add 5 to xs[0]`, `double the 3rd item of xs`.",
+        ],
+        snippet: "list-items",
+      },
+      {
+        id: "list-growing",
+        title: "Growing and shrinking",
+        body: [
+          "`push x to xs` appends; `push x to xs at i` (or `insert x into xs at i`) puts it before item `i`, and `i` may equal the length. `pop xs` removes the last item and hands it back; `pop xs at i` removes a chosen one. Each has a call spelling as well.",
+        ],
+        snippet: "list-growing",
+        table: {
+          head: ["Spoken", "Call form", "Effect"],
+          rows: [
+            ["`push x to xs`", "`push(xs, x)`", "append"],
+            ["`push x to xs at i`, `insert x into xs at i`", "`insert(xs, i, x)`", "insert before item i"],
+            ["`pop xs`", "`pop(xs)`", "remove and return the last item"],
+            ["`pop xs at i`", "`pop(xs, i)`", "remove and return item i"],
+            ["`length of xs`", "`length(xs)`", "how many items"],
+            ["`xs contains x`, `x is in xs`", "-", "membership; `is not in` negates"],
+            ["`xs is empty`", "-", "no items"],
+            ["`copy of xs`", "`copy(xs)`", "a separate list with the same items"],
+          ],
+        },
+      },
+      {
+        id: "for-each",
+        title: "for each",
+        body: [
+          "`for each x in xs` visits every item in order; `for every` and the C++ `for (integer x : xs)` are the same loop. The variable is a copy of the item, typed from the list unless you give it a type.",
+          "The length is read again every turn, so pushing inside the body extends the loop instead of crashing it. `stop` and `skip` work as in any loop.",
+        ],
+        snippet: "for-each",
+      },
+      {
+        id: "list-references",
+        title: "Lists are references",
+        body: [
+          "A list is one thing, and a variable holds a reference to it. Assigning a list to another variable, or passing it to a function, makes a second name for the same list - changes through either name show through both. That is how a procedure can fill or sort a list for its caller.",
+          "When you want an independent list, say so: `copy of xs` makes a new list with the same items (one level deep). `is` compares lists item by item, not by identity.",
+        ],
+        snippet: "list-references",
+      },
+      {
+        id: "list-errors",
+        title: "Out of range",
+        body: [
+          "Indexes must be integers from 0 to length - 1; there is no negative or wrap-around indexing. Reading or writing past the end, popping an empty list, or giving a list a negative size stops the program with a runtime error that names the index and the length.",
+        ],
+        snippet: "list-errors",
+      },
+    ],
+  },
+
+  {
     id: "functions",
     title: "Functions",
     intro: "Values in, values out (or nothing at all)",
@@ -446,20 +532,21 @@ export const REFERENCE: {
       head: ["Level", "Operators"],
       rows: [
         ["1", "`( )`"],
-        ["2", "`as` (cast)"],
-        ["3", "`squared`, `cubed`"],
-        ["4", "spoken builtins: `square root of`, `length of`, ..."],
-        ["5", "`^`, `**`, `to the power of` (right associative)"],
-        ["6", "unary `-`"],
-        ["7", "`not`, `!`, `~`"],
-        ["8", "`*`, `/`, `%`"],
-        ["9", "`+`, `-`"],
-        ["10", "`subtracted from`"],
-        ["11", "predicates: `is even`, `is between ... and ...`, ..."],
-        ["12", "`<`, `>`, `<=`, `>=`"],
-        ["13", "`==`, `!=`"],
-        ["14", "`and`, `&&`"],
-        ["15", "`or`, `||`"],
+        ["2", "`xs[i]` (an item)"],
+        ["3", "`as` (cast)"],
+        ["4", "`squared`, `cubed`"],
+        ["5", "spoken builtins, `Nth item of`, `pop`, `ask`"],
+        ["6", "`^`, `**`, `to the power of` (right associative)"],
+        ["7", "unary `-`"],
+        ["8", "`not`, `!`, `~`"],
+        ["9", "`*`, `/`, `%`"],
+        ["10", "`+`, `-`"],
+        ["11", "`subtracted from`"],
+        ["12", "predicates: `is even`, `is between ... and ...`, `is in`, `contains`, ..."],
+        ["13", "`<`, `>`, `<=`, `>=`"],
+        ["14", "`==`, `!=`"],
+        ["15", "`and`, `&&`"],
+        ["16", "`or`, `||`"],
       ],
     },
   },
@@ -491,12 +578,16 @@ export const REFERENCE: {
           "`even`, `odd`, `positive`, `negative`, `empty`, `divisible`, `between`",
         ],
         [
+          "Lists",
+          "`list`, `in`, `at`, `push`, `insert`, `into`, `pop`, `contains`, and the phrases `for each`, `for every`, `is a list of`, `list of`, `item of`, `value of`, `copy of`",
+        ],
+        [
           "Operators",
           "`is`, `equals`, `plus`, `minus`, `times`, `and`, `or`, `not`, `as`, `squared`, `cubed`",
         ],
         [
           "Types",
-          "`int`, `integer`, `number`, `float`, `bool`, `boolean`, `char`, `character`, `string`, `varchar`",
+          "`int`, `integer`, `number`, `float`, `bool`, `boolean`, `char`, `character`, `string`, `varchar`, and their plurals",
         ],
         ["Literals", "`true`, `false`"],
       ],

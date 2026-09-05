@@ -1,0 +1,15 @@
+main {
+    integer[] queue <- [10, 20];
+
+    push 30 to queue;                     // append
+    push 5 to queue at 0;                 // insert before item 0
+    insert 15 into queue at 2;            // the same, spoken differently
+    say queue;
+
+    say pop queue;                        // removes and returns the last item
+    say pop queue at 0;                   // or a chosen one
+    say queue;
+
+    push(queue, 40);                      // every operation has a call spelling
+    say pop(queue, 1), " ", queue;
+}

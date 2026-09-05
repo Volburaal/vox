@@ -1,0 +1,2 @@
+line 4:8 error: variable 'count' is already declared in an enclosing scope
+1 error

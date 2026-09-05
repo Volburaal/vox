@@ -1,0 +1,13 @@
+main {
+    list<integer> scores;                 // generic
+    integer[] marks;                      // C-style
+    integer temps[];                      // C-style, bracket after the name
+    names is a list of strings;           // spoken
+    integer zeros[3];                     // three default values
+    let primes be [2, 3, 5];              // inferred: a list of integer
+
+    push 90 to scores;
+    say scores, " ", marks, " ", temps, " ", names;
+    say zeros;
+    say primes, " has ", length of primes, " items";
+}

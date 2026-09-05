@@ -1,0 +1,18 @@
+// The station playlist: a list that grows, shrinks and gets walked.
+main {
+    string[] playlist <- ["intro", "news"];
+    push "weather" to playlist;
+    push "traffic" to playlist at 1;
+    say "tonight: ", playlist;
+
+    say "first up: ", 1st item of playlist;
+    say "we have ", length of playlist, " segments";
+
+    for each segment in playlist {
+        say "  now playing ", uppercase of segment;
+    }
+
+    let dropped be pop playlist at 1;
+    say "cut for time: ", dropped;
+    say "final: ", playlist;
+}

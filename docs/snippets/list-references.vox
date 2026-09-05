@@ -1,0 +1,19 @@
+procedure add_bonus(integer[] marks) {
+    for i from 0 until length of marks {
+        add 5 to marks[i];                // the caller's list changes
+    }
+}
+
+main {
+    integer[] marks <- [60, 70];
+    integer[] same <- marks;              // two names, one list
+    integer[] separate <- copy of marks;  // a second list
+
+    add_bonus(marks);
+    push 80 to same;
+
+    say marks;
+    say same;
+    say separate;
+    say marks is same, " ", marks is separate;
+}
