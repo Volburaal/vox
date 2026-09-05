@@ -1,15 +1,7 @@
 import {
-  VoxValue,
-  VoxRuntimeError,
-  display,
-  truthy,
-  arithmetic,
-  compare,
-  coerceInput,
-  negate,
-  cast,
-  builtin,
-} from "./values.js";
+    VoxValue, VoxRuntimeError, display, truthy, arithmetic, compare, coerceInput,
+    negate, cast, builtin, equal, defaultValue, asList, checkIndex, describe,
+} from './values.js';
 
 export { VoxRuntimeError };
 
@@ -20,16 +12,16 @@ export { VoxRuntimeError };
  *                  call provideInput(line) and run() again
  *   'paused'     - the per-call step budget ran out; call run() again
  */
-export type RunStatus = "done" | "need-input" | "paused";
+export type RunStatus = 'done' | 'need-input' | 'paused';
 
 /** One activation record. Locals are private to this frame. */
 class Frame {
-  readonly locals = new Map<string, VoxValue>();
-  constructor(
-    readonly returnPc: number,
-    readonly destVar: string | null,
-    readonly args: VoxValue[],
-  ) {}
+    readonly locals = new Map<string, VoxValue>();
+    constructor(
+        readonly returnPc: number,
+        readonly destVar: string | null,
+        readonly args: VoxValue[],
+    ) {}
 }
 
 const DEFAULT_STEP_LIMIT = 50_000_000;
@@ -56,365 +48,404 @@ const DEFAULT_STEP_LIMIT = 50_000_000;
  *   and|or <dest> <left> <right>
  *   cast <dest> <operand> <type>
  *   builtin <dest> <name> [operand...]
+ *   list <dest> [item...]          a new list holding the operands
+ *   list_fill <dest> <count> <type>   a new list of <count> defaults of <type>
+ *   list_get <dest> <list> <index>
+ *   list_set <list> <index> <value>
+ *   list_push <list> <value>
+ *   list_insert <list> <index> <value>
+ *   list_pop <dest> <list> [index]    removes (and yields) the last item, or item <index>
+ *   list_has <dest> <list> <value>
  *   if_false <cond> goto <label>
  *   goto <label>
  *   label <label>
  *   call <func> [arg...] -> <dest>
  *   return [operand]
+ *
+ * Lists are references: `set ys xs` makes two names for one list, and a list
+ * passed to a function is the caller's list.
  */
 export class IRExecutor {
-  /** Receives each chunk the program prints. No newline is added: text is
-   *  raw and lines exist only where the program printed "\n". */
-  onOutput: (chunk: string) => void = () => {};
+    /** Receives each chunk the program prints. No newline is added: text is
+     *  raw, and lines exist only where the program printed "\n". */
+    onOutput: (chunk: string) => void = () => {};
 
-  private readonly instructions: string[];
-  private readonly labelToIndex = new Map<string, number>();
-  private readonly functionToIndex = new Map<string, number>();
-  private readonly callStack: Frame[] = [];
-  private readonly inputQueue: string[] = [];
-  private readonly stepLimit: number;
+    private readonly instructions: string[];
+    private readonly labelToIndex = new Map<string, number>();
+    private readonly functionToIndex = new Map<string, number>();
+    private readonly callStack: Frame[] = [];
+    private readonly inputQueue: string[] = [];
+    private readonly stepLimit: number;
 
-  private pc = 0;
-  private steps = 0;
-  private started = false;
-  private finished = false;
+    private pc = 0;
+    private steps = 0;
+    private started = false;
+    private finished = false;
 
-  constructor(instructions: string[], options?: { stepLimit?: number }) {
-    this.instructions = [...instructions];
-    this.stepLimit = options?.stepLimit ?? DEFAULT_STEP_LIMIT;
-    for (let i = 0; i < this.instructions.length; i++) {
-      const t = tokenize(this.instructions[i]);
-      if (t.length < 2) continue;
-      if (t[0] === "label") this.labelToIndex.set(t[1], i);
-      else if (t[0] === "func_start") this.functionToIndex.set(t[1], i);
-    }
-  }
-
-  /** Queues one line for the next input() the program executes. */
-  provideInput(line: string): void {
-    this.inputQueue.push(line);
-  }
-
-  /**
-   * Runs until the program finishes, needs input or (when given) the
-   * per-call step budget is spent. Throws VoxRuntimeError on program errors.
-   */
-  run(budget?: number): RunStatus {
-    if (this.finished) return "done";
-
-    if (!this.started) {
-      const mainIndex = this.functionToIndex.get("main");
-      if (mainIndex === undefined) {
-        throw new VoxRuntimeError("program has no main function");
-      }
-      // Start inside main rather than at instruction 0, which would
-      // otherwise fall into whichever function is emitted first.
-      this.callStack.push(new Frame(-1, null, []));
-      this.pc = mainIndex + 1;
-      this.started = true;
+    constructor(instructions: string[], options?: { stepLimit?: number }) {
+        this.instructions = [...instructions];
+        this.stepLimit = options?.stepLimit ?? DEFAULT_STEP_LIMIT;
+        for (let i = 0; i < this.instructions.length; i++) {
+            const t = tokenize(this.instructions[i]);
+            if (t.length < 2) continue;
+            if (t[0] === 'label') this.labelToIndex.set(t[1], i);
+            else if (t[0] === 'func_start') this.functionToIndex.set(t[1], i);
+        }
     }
 
-    let remaining = budget ?? Infinity;
-
-    while (this.pc >= 0 && this.pc < this.instructions.length) {
-      const raw = this.instructions[this.pc].trim();
-      if (raw === "") {
-        this.pc++;
-        continue;
-      }
-      const toks = tokenize(raw);
-      const op = toks[0];
-
-      // Pause BEFORE consuming the input instruction, so it re-executes
-      // once a line has been provided.
-      if (op === "input" && this.inputQueue.length === 0) {
-        return "need-input";
-      }
-      if (remaining <= 0) return "paused";
-      remaining--;
-
-      if (++this.steps > this.stepLimit) {
-        throw new VoxRuntimeError(
-          `execution step limit exceeded (${this.stepLimit}); the program is probably looping forever`,
-        );
-      }
-
-      switch (op) {
-        case "func_start":
-        case "label":
-          this.pc++;
-          break;
-
-        case "func_end": {
-          // Falling off the end of a function returns nothing.
-          if (this.doReturn(null)) return "done";
-          break;
-        }
-
-        case "param": {
-          this.require(toks, 3, raw);
-          const index = Number(toks[1]);
-          const args = this.frame().args;
-          this.frame().locals.set(
-            toks[2],
-            index < args.length ? args[index] : null,
-          );
-          this.pc++;
-          break;
-        }
-
-        case "set": {
-          this.require(toks, 3, raw);
-          this.frame().locals.set(toks[1], this.resolve(toks[2]));
-          this.pc++;
-          break;
-        }
-
-        case "input": {
-          this.require(toks, 2, raw);
-          this.frame().locals.set(
-            toks[1],
-            coerceInput(this.inputQueue.shift()!),
-          );
-          this.pc++;
-          break;
-        }
-
-        case "print": {
-          let out = "";
-          for (let i = 1; i < toks.length; i++)
-            out += display(this.resolve(toks[i]));
-          this.onOutput(out);
-          this.pc++;
-          break;
-        }
-
-        case "not": {
-          this.require(toks, 3, raw);
-          this.frame().locals.set(toks[1], !truthy(this.resolve(toks[2])));
-          this.pc++;
-          break;
-        }
-
-        case "neg": {
-          this.require(toks, 3, raw);
-          this.frame().locals.set(toks[1], negate(this.resolve(toks[2])));
-          this.pc++;
-          break;
-        }
-
-        case "add":
-        case "sub":
-        case "mul":
-        case "div":
-        case "mod":
-        case "power": {
-          this.require(toks, 4, raw);
-          this.frame().locals.set(
-            toks[1],
-            arithmetic(op, this.resolve(toks[2]), this.resolve(toks[3])),
-          );
-          this.pc++;
-          break;
-        }
-
-        case "eq":
-        case "ne":
-        case "lt":
-        case "gt":
-        case "le":
-        case "ge": {
-          this.require(toks, 4, raw);
-          this.frame().locals.set(
-            toks[1],
-            compare(op, this.resolve(toks[2]), this.resolve(toks[3])),
-          );
-          this.pc++;
-          break;
-        }
-
-        case "and":
-        case "or": {
-          this.require(toks, 4, raw);
-          const l = truthy(this.resolve(toks[2]));
-          const r = truthy(this.resolve(toks[3]));
-          this.frame().locals.set(toks[1], op === "and" ? l && r : l || r);
-          this.pc++;
-          break;
-        }
-
-        case "cast": {
-          this.require(toks, 4, raw);
-          this.frame().locals.set(
-            toks[1],
-            cast(this.resolve(toks[2]), toks[3]),
-          );
-          this.pc++;
-          break;
-        }
-
-        case "builtin": {
-          this.require(toks, 3, raw);
-          const args: VoxValue[] = [];
-          for (let i = 3; i < toks.length; i++)
-            args.push(this.resolve(toks[i]));
-          this.frame().locals.set(toks[1], builtin(toks[2], args));
-          this.pc++;
-          break;
-        }
-
-        case "if_false": {
-          this.require(toks, 4, raw);
-          if (toks[2] !== "goto")
-            throw new VoxRuntimeError("malformed if_false: " + raw);
-          this.pc = truthy(this.resolve(toks[1]))
-            ? this.pc + 1
-            : this.labelIndex(toks[3]);
-          break;
-        }
-
-        case "goto": {
-          this.require(toks, 2, raw);
-          this.pc = this.labelIndex(toks[1]);
-          break;
-        }
-
-        case "call": {
-          let arrow = -1;
-          for (let i = 2; i < toks.length; i++) if (toks[i] === "->") arrow = i;
-          if (arrow === -1 || arrow + 1 >= toks.length) {
-            throw new VoxRuntimeError("malformed call: " + raw);
-          }
-          const name = toks[1];
-          const target = this.functionToIndex.get(name);
-          if (target === undefined)
-            throw new VoxRuntimeError("unknown function: " + name);
-
-          const args: VoxValue[] = [];
-          for (let i = 2; i < arrow; i++) args.push(this.resolve(toks[i]));
-
-          this.callStack.push(new Frame(this.pc + 1, toks[arrow + 1], args));
-          this.pc = target + 1;
-          break;
-        }
-
-        case "return": {
-          const value = toks.length >= 2 ? this.resolve(toks[1]) : null;
-          if (this.doReturn(value)) return "done";
-          break;
-        }
-
-        default:
-          throw new VoxRuntimeError(`unknown instruction '${op}' in: ${raw}`);
-      }
+    /** Queues one line for the next input() the program executes. */
+    provideInput(line: string): void {
+        this.inputQueue.push(line);
     }
 
-    this.finished = true;
-    return "done";
-  }
+    /**
+     * Runs until the program finishes, needs input, or (when given) the
+     * per-call step budget is spent. Throws VoxRuntimeError on program errors.
+     */
+    run(budget?: number): RunStatus {
+        if (this.finished) return 'done';
 
-  /** Pops the current frame. Returns true if the program is done. */
-  private doReturn(value: VoxValue): boolean {
-    const done = this.callStack.pop()!;
-    if (this.callStack.length === 0) {
-      this.finished = true;
-      return true; // returned out of main
+        if (!this.started) {
+            const mainIndex = this.functionToIndex.get('main');
+            if (mainIndex === undefined) {
+                throw new VoxRuntimeError('program has no main function');
+            }
+            // Start inside main rather than at instruction 0, which would
+            // otherwise fall into whichever function is emitted first.
+            this.callStack.push(new Frame(-1, null, []));
+            this.pc = mainIndex + 1;
+            this.started = true;
+        }
+
+        let remaining = budget ?? Infinity;
+
+        while (this.pc >= 0 && this.pc < this.instructions.length) {
+            const raw = this.instructions[this.pc].trim();
+            if (raw === '') { this.pc++; continue; }
+            const toks = tokenize(raw);
+            const op = toks[0];
+
+            // Pause BEFORE consuming the input instruction, so it re-executes
+            // once a line has been provided.
+            if (op === 'input' && this.inputQueue.length === 0) {
+                return 'need-input';
+            }
+            if (remaining <= 0) return 'paused';
+            remaining--;
+
+            if (++this.steps > this.stepLimit) {
+                throw new VoxRuntimeError(
+                    `execution step limit exceeded (${this.stepLimit}); the program is probably looping forever`);
+            }
+
+            switch (op) {
+                case 'func_start':
+                case 'label':
+                    this.pc++;
+                    break;
+
+                case 'func_end': {
+                    // Falling off the end of a function returns nothing.
+                    if (this.doReturn(null)) return 'done';
+                    break;
+                }
+
+                case 'param': {
+                    this.require(toks, 3, raw);
+                    const index = Number(toks[1]);
+                    const args = this.frame().args;
+                    this.frame().locals.set(toks[2], index < args.length ? args[index] : null);
+                    this.pc++;
+                    break;
+                }
+
+                case 'set': {
+                    this.require(toks, 3, raw);
+                    this.frame().locals.set(toks[1], this.resolve(toks[2]));
+                    this.pc++;
+                    break;
+                }
+
+                case 'input': {
+                    this.require(toks, 2, raw);
+                    this.frame().locals.set(toks[1], coerceInput(this.inputQueue.shift()!));
+                    this.pc++;
+                    break;
+                }
+
+                case 'print': {
+                    let out = '';
+                    for (let i = 1; i < toks.length; i++) out += display(this.resolve(toks[i]));
+                    this.onOutput(out);
+                    this.pc++;
+                    break;
+                }
+
+                case 'not': {
+                    this.require(toks, 3, raw);
+                    this.frame().locals.set(toks[1], !truthy(this.resolve(toks[2])));
+                    this.pc++;
+                    break;
+                }
+
+                case 'neg': {
+                    this.require(toks, 3, raw);
+                    this.frame().locals.set(toks[1], negate(this.resolve(toks[2])));
+                    this.pc++;
+                    break;
+                }
+
+                case 'add': case 'sub': case 'mul':
+                case 'div': case 'mod': case 'power': {
+                    this.require(toks, 4, raw);
+                    this.frame().locals.set(toks[1],
+                        arithmetic(op, this.resolve(toks[2]), this.resolve(toks[3])));
+                    this.pc++;
+                    break;
+                }
+
+                case 'eq': case 'ne': case 'lt':
+                case 'gt': case 'le': case 'ge': {
+                    this.require(toks, 4, raw);
+                    this.frame().locals.set(toks[1],
+                        compare(op, this.resolve(toks[2]), this.resolve(toks[3])));
+                    this.pc++;
+                    break;
+                }
+
+                case 'and': case 'or': {
+                    this.require(toks, 4, raw);
+                    const l = truthy(this.resolve(toks[2]));
+                    const r = truthy(this.resolve(toks[3]));
+                    this.frame().locals.set(toks[1], op === 'and' ? (l && r) : (l || r));
+                    this.pc++;
+                    break;
+                }
+
+                case 'cast': {
+                    this.require(toks, 4, raw);
+                    this.frame().locals.set(toks[1], cast(this.resolve(toks[2]), toks[3]));
+                    this.pc++;
+                    break;
+                }
+
+                case 'builtin': {
+                    this.require(toks, 3, raw);
+                    const args: VoxValue[] = [];
+                    for (let i = 3; i < toks.length; i++) args.push(this.resolve(toks[i]));
+                    this.frame().locals.set(toks[1], builtin(toks[2], args));
+                    this.pc++;
+                    break;
+                }
+
+                // ---- lists ----------------------------------------------
+
+                case 'list': {
+                    this.require(toks, 2, raw);
+                    const items: VoxValue[] = [];
+                    for (let i = 2; i < toks.length; i++) items.push(this.resolve(toks[i]));
+                    this.frame().locals.set(toks[1], items);
+                    this.pc++;
+                    break;
+                }
+
+                case 'list_fill': {
+                    this.require(toks, 4, raw);
+                    const count = this.resolve(toks[2]);
+                    if (typeof count !== 'bigint') {
+                        throw new VoxRuntimeError(`list size must be an integer but got ${describe(count)}`);
+                    }
+                    if (count < 0n) throw new VoxRuntimeError(`cannot make a list of ${count} items`);
+                    const items: VoxValue[] = [];
+                    for (let i = 0n; i < count; i++) items.push(defaultValue(toks[3]));
+                    this.frame().locals.set(toks[1], items);
+                    this.pc++;
+                    break;
+                }
+
+                case 'list_get': {
+                    this.require(toks, 4, raw);
+                    const list = asList(this.resolve(toks[2]));
+                    const i = checkIndex(this.resolve(toks[3]), list.length, false);
+                    this.frame().locals.set(toks[1], list[i]);
+                    this.pc++;
+                    break;
+                }
+
+                case 'list_set': {
+                    this.require(toks, 4, raw);
+                    const list = asList(this.resolve(toks[1]));
+                    const i = checkIndex(this.resolve(toks[2]), list.length, false);
+                    list[i] = this.resolve(toks[3]);
+                    this.pc++;
+                    break;
+                }
+
+                case 'list_push': {
+                    this.require(toks, 3, raw);
+                    asList(this.resolve(toks[1])).push(this.resolve(toks[2]));
+                    this.pc++;
+                    break;
+                }
+
+                case 'list_insert': {
+                    this.require(toks, 4, raw);
+                    const list = asList(this.resolve(toks[1]));
+                    const i = checkIndex(this.resolve(toks[2]), list.length, true);
+                    list.splice(i, 0, this.resolve(toks[3]));
+                    this.pc++;
+                    break;
+                }
+
+                case 'list_pop': {
+                    this.require(toks, 3, raw);
+                    const list = asList(this.resolve(toks[2]));
+                    if (list.length === 0) throw new VoxRuntimeError('cannot pop from an empty list');
+                    const i = toks.length >= 4
+                        ? checkIndex(this.resolve(toks[3]), list.length, false)
+                        : list.length - 1;
+                    this.frame().locals.set(toks[1], list.splice(i, 1)[0]);
+                    this.pc++;
+                    break;
+                }
+
+                case 'list_has': {
+                    this.require(toks, 4, raw);
+                    const list = asList(this.resolve(toks[2]));
+                    const wanted = this.resolve(toks[3]);
+                    this.frame().locals.set(toks[1], list.some(item => equal(item, wanted)));
+                    this.pc++;
+                    break;
+                }
+
+                case 'if_false': {
+                    this.require(toks, 4, raw);
+                    if (toks[2] !== 'goto') throw new VoxRuntimeError('malformed if_false: ' + raw);
+                    this.pc = truthy(this.resolve(toks[1])) ? this.pc + 1 : this.labelIndex(toks[3]);
+                    break;
+                }
+
+                case 'goto': {
+                    this.require(toks, 2, raw);
+                    this.pc = this.labelIndex(toks[1]);
+                    break;
+                }
+
+                case 'call': {
+                    let arrow = -1;
+                    for (let i = 2; i < toks.length; i++) if (toks[i] === '->') arrow = i;
+                    if (arrow === -1 || arrow + 1 >= toks.length) {
+                        throw new VoxRuntimeError('malformed call: ' + raw);
+                    }
+                    const name = toks[1];
+                    const target = this.functionToIndex.get(name);
+                    if (target === undefined) throw new VoxRuntimeError('unknown function: ' + name);
+
+                    const args: VoxValue[] = [];
+                    for (let i = 2; i < arrow; i++) args.push(this.resolve(toks[i]));
+
+                    this.callStack.push(new Frame(this.pc + 1, toks[arrow + 1], args));
+                    this.pc = target + 1;
+                    break;
+                }
+
+                case 'return': {
+                    const value = toks.length >= 2 ? this.resolve(toks[1]) : null;
+                    if (this.doReturn(value)) return 'done';
+                    break;
+                }
+
+                default:
+                    throw new VoxRuntimeError(`unknown instruction '${op}' in: ${raw}`);
+            }
+        }
+
+        this.finished = true;
+        return 'done';
     }
-    if (done.destVar !== null) this.frame().locals.set(done.destVar, value);
-    this.pc = done.returnPc;
-    return false;
-  }
 
-  private frame(): Frame {
-    return this.callStack[this.callStack.length - 1];
-  }
-
-  private labelIndex(label: string): number {
-    const target = this.labelToIndex.get(label);
-    if (target === undefined)
-      throw new VoxRuntimeError("unknown label: " + label);
-    return target + 1;
-  }
-
-  private require(toks: string[], n: number, raw: string): void {
-    if (toks.length < n)
-      throw new VoxRuntimeError("malformed instruction: " + raw);
-  }
-
-  private resolve(token: string): VoxValue {
-    if (token === "") return null;
-
-    if (token.length >= 2 && token.startsWith('"') && token.endsWith('"')) {
-      return unescape(token.slice(1, -1));
+    /** Pops the current frame. Returns true if the program is done. */
+    private doReturn(value: VoxValue): boolean {
+        const done = this.callStack.pop()!;
+        if (this.callStack.length === 0) {
+            this.finished = true;
+            return true; // returned out of main
+        }
+        if (done.destVar !== null) this.frame().locals.set(done.destVar, value);
+        this.pc = done.returnPc;
+        return false;
     }
-    if (token === "true") return true;
-    if (token === "false") return false;
-    if (/^-?\d+$/.test(token)) return BigInt(token);
-    if (/^-?\d*\.\d+$/.test(token)) return Number(token);
 
-    return this.frame().locals.get(token) ?? null;
-  }
+    private frame(): Frame {
+        return this.callStack[this.callStack.length - 1];
+    }
+
+    private labelIndex(label: string): number {
+        const target = this.labelToIndex.get(label);
+        if (target === undefined) throw new VoxRuntimeError('unknown label: ' + label);
+        return target + 1;
+    }
+
+    private require(toks: string[], n: number, raw: string): void {
+        if (toks.length < n) throw new VoxRuntimeError('malformed instruction: ' + raw);
+    }
+
+    private resolve(token: string): VoxValue {
+        if (token === '') return null;
+
+        if (token.length >= 2 && token.startsWith('"') && token.endsWith('"')) {
+            return unescape(token.slice(1, -1));
+        }
+        if (token === 'true') return true;
+        if (token === 'false') return false;
+        if (/^-?\d+$/.test(token)) return BigInt(token);
+        if (/^-?\d*\.\d+$/.test(token)) return Number(token);
+
+        return this.frame().locals.get(token) ?? null;
+    }
 }
 
 /** Splits on whitespace, keeping quoted strings (and their escapes) intact. */
 export function tokenize(line: string): string[] {
-  const out: string[] = [];
-  let cur = "";
-  let inQuote = false;
+    const out: string[] = [];
+    let cur = '';
+    let inQuote = false;
 
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (inQuote && c === "\\" && i + 1 < line.length) {
-      cur += c + line[++i]; // keep the escape pair together
-      continue;
+    for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (inQuote && c === '\\' && i + 1 < line.length) {
+            cur += c + line[++i]; // keep the escape pair together
+            continue;
+        }
+        if (c === '"') {
+            cur += c;
+            inQuote = !inQuote;
+            continue;
+        }
+        if (!inQuote && /\s/.test(c)) {
+            if (cur !== '') { out.push(cur); cur = ''; }
+            continue;
+        }
+        cur += c;
     }
-    if (c === '"') {
-      cur += c;
-      inQuote = !inQuote;
-      continue;
-    }
-    if (!inQuote && /\s/.test(c)) {
-      if (cur !== "") {
-        out.push(cur);
-        cur = "";
-      }
-      continue;
-    }
-    cur += c;
-  }
-  if (cur !== "") out.push(cur);
-  return out;
+    if (cur !== '') out.push(cur);
+    return out;
 }
 
 function unescape(s: string): string {
-  let out = "";
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (c !== "\\" || i + 1 >= s.length) {
-      out += c;
-      continue;
+    let out = '';
+    for (let i = 0; i < s.length; i++) {
+        const c = s[i];
+        if (c !== '\\' || i + 1 >= s.length) { out += c; continue; }
+        const next = s[++i];
+        switch (next) {
+            case 'n': out += '\n'; break;
+            case 't': out += '\t'; break;
+            case 'r': out += '\r'; break;
+            case '"': out += '"'; break;
+            case '\\': out += '\\'; break;
+            default: out += next; break;
+        }
     }
-    const next = s[++i];
-    switch (next) {
-      case "n":
-        out += "\n";
-        break;
-      case "t":
-        out += "\t";
-        break;
-      case "r":
-        out += "\r";
-        break;
-      case '"':
-        out += '"';
-        break;
-      case "\\":
-        out += "\\";
-        break;
-      default:
-        out += next;
-        break;
-    }
-  }
-  return out;
+    return out;
 }

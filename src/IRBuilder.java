@@ -20,6 +20,22 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         }
     }
 
+    /**
+     * A resolved assignment target: a variable (name set), or an item of a
+     * list whose base and index operands have already been evaluated.
+     */
+    private static final class Place {
+        final String name;
+        final String list;
+        final String index;
+        Place(String name, String list, String index) {
+            this.name = name;
+            this.list = list;
+            this.index = index;
+        }
+        boolean isName() { return name != null; }
+    }
+
     private final List<String> instructions = new ArrayList<>();
     private int tempCounter = 0;
     private int labelCounter = 0;
@@ -90,7 +106,7 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         if (ctx.expression() != null) {
             emit("set " + name + " " + visit(ctx.expression()));
         } else {
-            emit("set " + name + " " + defaultValue(ctx.datatype().getText()));
+            emitDefault(name, SemanticAnalyzer.typeName(ctx.datatype()));
         }
         return null;
     }
@@ -107,8 +123,38 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         return null;
     }
 
-    private static String defaultValue(String datatype) {
-        switch (SemanticAnalyzer.canonical(datatype)) {
+    /** `integer xs[5]` fills five defaults; `integer xs[]` is a new empty list. */
+    @Override
+    public String visitDeclSized(VoxParser.DeclSizedContext ctx) {
+        String name = ctx.ID().getText();
+        if (ctx.init != null) {
+            emit("set " + name + " " + visit(ctx.init));
+        } else if (ctx.size != null) {
+            emit("list_fill " + name + " " + visit(ctx.size) + " "
+                    + irType(SemanticAnalyzer.typeName(ctx.datatype())));
+        } else {
+            emit("list " + name);
+        }
+        return null;
+    }
+
+    @Override
+    public String visitDeclListIs(VoxParser.DeclListIsContext ctx) {
+        String name = ctx.ID().getText();
+        if (ctx.init != null) emit("set " + name + " " + visit(ctx.init));
+        else emit("list " + name);
+        return null;
+    }
+
+    /** A variable declared without a value starts at its type's default. */
+    private void emitDefault(String name, String type) {
+        if (SemanticAnalyzer.isList(type)) emit("list " + name);
+        else emit("set " + name + " " + defaultLiteral(type));
+    }
+
+    /** The literal a scalar variable starts with when declared without a value. */
+    private static String defaultLiteral(String type) {
+        switch (type) {
             case "integer":   return "0";
             case "float":     return "0.0";
             case "boolean":   return "false";
@@ -118,36 +164,82 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         }
     }
 
+    /** The IR spells list types without spaces: `list<list<integer>>`. */
+    private static String irType(String type) {
+        return SemanticAnalyzer.isList(type)
+                ? "list<" + irType(SemanticAnalyzer.elementOf(type)) + ">"
+                : type;
+    }
+
+    // --------------------------------------------------------- assignments --
+
     @Override
     public String visitAssignForward(VoxParser.AssignForwardContext ctx) {
-        emit("set " + ctx.ID().getText() + " " + visit(ctx.expression()));
+        String value = visit(ctx.expression());
+        store(place(ctx.target()), value);
         return null;
     }
 
     @Override
     public String visitAssignReverse(VoxParser.AssignReverseContext ctx) {
-        emit("set " + ctx.ID().getText() + " " + visit(ctx.expression()));
+        String value = visit(ctx.expression());
+        store(place(ctx.target()), value);
         return null;
     }
 
     @Override
     public String visitSetTo(VoxParser.SetToContext ctx) {
-        emit("set " + ctx.ID().getText() + " " + visit(ctx.expression()));
+        String value = visit(ctx.expression());
+        store(place(ctx.target()), value);
         return null;
+    }
+
+    /**
+     * Evaluates a target down to somewhere a value can be read or written:
+     * a variable name, or a list operand plus an index operand. `2nd item of
+     * xs` is xs with index 1.
+     */
+    private Place place(VoxParser.TargetContext target) {
+        if (target instanceof VoxParser.NameTargetContext) {
+            return new Place(((VoxParser.NameTargetContext) target).ID().getText(), null, null);
+        }
+        if (target instanceof VoxParser.IndexTargetContext) {
+            VoxParser.IndexTargetContext indexed = (VoxParser.IndexTargetContext) target;
+            String list = load(place(indexed.target()));
+            String index = visit(indexed.expression());
+            return new Place(null, list, index);
+        }
+        VoxParser.OrdinalTargetContext ordinal = (VoxParser.OrdinalTargetContext) target;
+        String list = load(place(ordinal.target()));
+        return new Place(null, list, String.valueOf(ordinalIndex(ordinal.ORDINAL().getText())));
+    }
+
+    /** Reads a place; a variable is its own operand, an item needs a fetch. */
+    private String load(Place p) {
+        if (p.isName()) return p.name;
+        String dest = newTemp();
+        emit("list_get " + dest + " " + p.list + " " + p.index);
+        return dest;
+    }
+
+    private void store(Place p, String value) {
+        if (p.isName()) emit("set " + p.name + " " + value);
+        else emit("list_set " + p.list + " " + p.index + " " + value);
     }
 
     // ------------------------------------------------------------ updates --
     // `n += x` and every spoken spelling of it become one instruction whose
-    // destination is also its first operand: `add n n x`.
+    // destination is also its first operand: `add n n x`. An item update
+    // fetches, updates the temporary, and stores it back.
 
     @Override
     public String visitIncStmt(VoxParser.IncStmtContext ctx) {
-        return update("add", ctx.ID().getText(), "1");
+        return update("add", ctx.target(), "1");
     }
 
     @Override
     public String visitDecStmt(VoxParser.DecStmtContext ctx) {
-        return update("sub", ctx.ID().getText(), "1");
+        return update("sub", ctx.target(), "1");
     }
 
     @Override
@@ -161,64 +253,182 @@ public class IRBuilder extends VoxBaseVisitor<String> {
             case VoxParser.MOD_ASSIGN: op = "mod"; break;
             default:                   op = "power"; break;
         }
-        return update(op, ctx.ID().getText(), visit(ctx.expression()));
+        return update(op, ctx.target(), visit(ctx.expression()));
     }
 
     @Override
     public String visitIncreaseBy(VoxParser.IncreaseByContext ctx) {
-        return update("add", ctx.ID().getText(), visit(ctx.expression()));
+        return update("add", ctx.target(), visit(ctx.expression()));
     }
 
     @Override
     public String visitDecreaseBy(VoxParser.DecreaseByContext ctx) {
-        return update("sub", ctx.ID().getText(), visit(ctx.expression()));
+        return update("sub", ctx.target(), visit(ctx.expression()));
     }
 
     @Override
     public String visitAddTo(VoxParser.AddToContext ctx) {
-        return update("add", ctx.ID().getText(), visit(ctx.expression()));
+        return update("add", ctx.target(), visit(ctx.expression()));
     }
 
     @Override
     public String visitTakeFrom(VoxParser.TakeFromContext ctx) {
-        return update("sub", ctx.ID().getText(), visit(ctx.expression()));
+        return update("sub", ctx.target(), visit(ctx.expression()));
     }
 
     @Override
     public String visitMultiplyBy(VoxParser.MultiplyByContext ctx) {
-        return update("mul", ctx.ID().getText(), visit(ctx.expression()));
+        return update("mul", ctx.target(), visit(ctx.expression()));
     }
 
     @Override
     public String visitDivideBy(VoxParser.DivideByContext ctx) {
-        return update("div", ctx.ID().getText(), visit(ctx.expression()));
+        return update("div", ctx.target(), visit(ctx.expression()));
     }
 
     @Override
     public String visitDoubleStmt(VoxParser.DoubleStmtContext ctx) {
-        return update("mul", ctx.ID().getText(), "2");
+        return update("mul", ctx.target(), "2");
     }
 
     @Override
     public String visitHalveStmt(VoxParser.HalveStmtContext ctx) {
-        return update("div", ctx.ID().getText(), "2");
+        return update("div", ctx.target(), "2");
     }
 
-    private String update(String op, String name, String operand) {
-        emit(op + " " + name + " " + name + " " + operand);
+    private String update(String op, VoxParser.TargetContext target, String operand) {
+        Place p = place(target);
+        if (p.isName()) {
+            emit(op + " " + p.name + " " + p.name + " " + operand);
+            return null;
+        }
+        String current = load(p);
+        emit(op + " " + current + " " + current + " " + operand);
+        store(p, current);
         return null;
     }
 
     /** Swap through a temporary: three moves, no arithmetic. */
     @Override
     public String visitSwapStmt(VoxParser.SwapStmtContext ctx) {
-        String a = ctx.ID(0).getText();
-        String b = ctx.ID(1).getText();
+        Place a = place(ctx.target(0));
+        Place b = place(ctx.target(1));
+        String first = load(a);
+        String second = load(b);
         String t = newTemp();
-        emit("set " + t + " " + a);
-        emit("set " + a + " " + b);
-        emit("set " + b + " " + t);
+        emit("set " + t + " " + first);
+        store(a, second);
+        store(b, t);
         return null;
+    }
+
+    // -------------------------------------------------------------- lists --
+
+    @Override
+    public String visitPushTo(VoxParser.PushToContext ctx) {
+        String value = visit(ctx.expression(0));
+        String list = visit(ctx.expression(1));
+        if (ctx.AT() != null) {
+            emit("list_insert " + list + " " + visit(ctx.expression(2)) + " " + value);
+        } else {
+            emit("list_push " + list + " " + value);
+        }
+        return null;
+    }
+
+    @Override
+    public String visitInsertInto(VoxParser.InsertIntoContext ctx) {
+        String value = visit(ctx.expression(0));
+        String list = visit(ctx.expression(1));
+        String index = visit(ctx.expression(2));
+        emit("list_insert " + list + " " + index + " " + value);
+        return null;
+    }
+
+    @Override
+    public String visitPopExpr(VoxParser.PopExprContext ctx) {
+        String list = visit(ctx.expression(0));
+        String index = ctx.AT() != null ? " " + visit(ctx.expression(1)) : "";
+        String dest = newTemp();
+        emit("list_pop " + dest + " " + list + index);
+        return dest;
+    }
+
+    // The call spellings: push(xs, v), insert(xs, i, v), pop(xs), pop(xs, i).
+
+    @Override
+    public String visitPushCall(VoxParser.PushCallContext ctx) {
+        String list = visit(ctx.expression(0));
+        String value = visit(ctx.expression(1));
+        emit("list_push " + list + " " + value);
+        return null;
+    }
+
+    @Override
+    public String visitInsertCall(VoxParser.InsertCallContext ctx) {
+        String list = visit(ctx.expression(0));
+        String index = visit(ctx.expression(1));
+        String value = visit(ctx.expression(2));
+        emit("list_insert " + list + " " + index + " " + value);
+        return null;
+    }
+
+    @Override
+    public String visitPopCall(VoxParser.PopCallContext ctx) {
+        String list = visit(ctx.expression(0));
+        String index = ctx.expression().size() > 1 ? " " + visit(ctx.expression(1)) : "";
+        String dest = newTemp();
+        emit("list_pop " + dest + " " + list + index);
+        return dest;
+    }
+
+    @Override
+    public String visitIndexExpr(VoxParser.IndexExprContext ctx) {
+        String list = visit(ctx.expression(0));
+        String index = visit(ctx.expression(1));
+        String dest = newTemp();
+        emit("list_get " + dest + " " + list + " " + index);
+        return dest;
+    }
+
+    @Override
+    public String visitOrdinalExpr(VoxParser.OrdinalExprContext ctx) {
+        String list = visit(ctx.expression());
+        String dest = newTemp();
+        emit("list_get " + dest + " " + list + " " + ordinalIndex(ctx.ORDINAL().getText()));
+        return dest;
+    }
+
+    @Override
+    public String visitListExpr(VoxParser.ListExprContext ctx) {
+        List<String> items = new ArrayList<>();
+        for (VoxParser.ExpressionContext e : ctx.expression()) items.add(visit(e));
+        String dest = newTemp();
+        StringBuilder sb = new StringBuilder("list ").append(dest);
+        for (String item : items) sb.append(' ').append(item);
+        emit(sb.toString());
+        return dest;
+    }
+
+    @Override
+    public String visitInExpr(VoxParser.InExprContext ctx) {
+        String value = visit(ctx.expression(0));
+        String list = visit(ctx.expression(1));
+        String dest = newTemp();
+        emit("list_has " + dest + " " + list + " " + value);
+        if (ctx.op.getType() != VoxParser.NE) return dest;
+        String inverted = newTemp();
+        emit("not " + inverted + " " + dest);
+        return inverted;
+    }
+
+    @Override
+    public String visitContainsExpr(VoxParser.ContainsExprContext ctx) {
+        String list = visit(ctx.expression(0));
+        String value = visit(ctx.expression(1));
+        String dest = newTemp();
+        emit("list_has " + dest + " " + list + " " + value);
+        return dest;
     }
 
     // ------------------------------------------------------------ control --
@@ -297,8 +507,7 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         boolean down = rc.dir.getType() == VoxParser.DOWN_TO;
         String compare = down ? "ge" : rc.dir.getType() == VoxParser.UNTIL ? "lt" : "le";
 
-        // Every bound is evaluated before the loop variable is assigned, so
-        // `for i from 1 to i + 2` measures the outer i.
+        // Every bound is evaluated before the loop variable is assigned.
         String first = visit(rc.start);
         String limit = frozen(rc.limit);
         String step = rc.step != null ? frozen(rc.step) : "1";
@@ -313,6 +522,38 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         loops.pop();
         emit("label " + cont);
         emit((down ? "sub" : "add") + " " + name + " " + name + " " + step);
+        emit("goto " + start);
+        emit("label " + end);
+        return null;
+    }
+
+    /**
+     * `for each x in xs` walks the list by index. The length is re-read every
+     * turn, so items pushed inside the body are visited too.
+     */
+    @Override
+    public String visitForEachLoop(VoxParser.ForEachLoopContext ctx) {
+        String name = ctx.ID().getText();
+        String start = newLabel("foreach");
+        String end = newLabel("endforeach");
+        String cont = newLabel("foreachcont");
+
+        String list = frozen(ctx.expression());
+        String index = newTemp();
+        emit("set " + index + " 0");
+
+        emit("label " + start);
+        String length = newTemp();
+        emit("builtin " + length + " length " + list);
+        String cond = newTemp();
+        emit("lt " + cond + " " + index + " " + length);
+        emit("if_false " + cond + " goto " + end);
+        emit("list_get " + name + " " + list + " " + index);
+        loops.push(new LoopLabels(end, cont));
+        visit(ctx.block());
+        loops.pop();
+        emit("label " + cont);
+        emit("add " + index + " " + index + " 1");
         emit("goto " + start);
         emit("label " + end);
         return null;
@@ -422,7 +663,7 @@ public class IRBuilder extends VoxBaseVisitor<String> {
     public String visitCastExpr(VoxParser.CastExprContext ctx) {
         String value = visit(ctx.expression());
         String dest = newTemp();
-        emit("cast " + dest + " " + value + " " + SemanticAnalyzer.canonical(ctx.datatype().getText()));
+        emit("cast " + dest + " " + value + " " + SemanticAnalyzer.typeName(ctx.datatype()));
         return dest;
     }
 
@@ -511,13 +752,19 @@ public class IRBuilder extends VoxBaseVisitor<String> {
             emit((wantZero ? "eq" : "ne") + " " + dest + " " + m + " 0");
             return dest;
         }
+        if (pred == VoxParser.EMPTY) {
+            // Strings and lists alike: empty means length zero.
+            String length = newTemp();
+            emit("builtin " + length + " length " + value);
+            String dest = newTemp();
+            emit((negated ? "ne" : "eq") + " " + dest + " " + length + " 0");
+            return dest;
+        }
         String dest = newTemp();
         if (pred == VoxParser.POSITIVE) {
             emit((negated ? "le" : "gt") + " " + dest + " " + value + " 0");
-        } else if (pred == VoxParser.NEGATIVE) {
+        } else { // NEGATIVE
             emit((negated ? "ge" : "lt") + " " + dest + " " + value + " 0");
-        } else { // EMPTY
-            emit((negated ? "ne" : "eq") + " " + dest + " " + value + " \"\"");
         }
         return dest;
     }
@@ -634,6 +881,11 @@ public class IRBuilder extends VoxBaseVisitor<String> {
     @Override public String visitFloatExpr(VoxParser.FloatExprContext ctx)   { return ctx.getText(); }
     @Override public String visitBoolExpr(VoxParser.BoolExprContext ctx)     { return ctx.getText(); }
     @Override public String visitStringExpr(VoxParser.StringExprContext ctx) { return normalizeString(ctx.getText()); }
+
+    /** `1st` is index 0, `2nd` is 1, and so on. The checker validated the suffix. */
+    private static int ordinalIndex(String text) {
+        return Integer.parseInt(text.replaceAll("[a-z]+$", "")) - 1;
+    }
 
     /**
      * The IR spells every string double-quoted, so a single-quoted source

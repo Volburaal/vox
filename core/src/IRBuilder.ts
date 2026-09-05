@@ -1,23 +1,28 @@
 import VoxVisitor from './gen/VoxVisitor.js';
 import VoxParser, {
     ProgramContext, PrototypeContext, DefinitionContext, MainFunctionContext,
-    BlockContext, DeclForwardContext, DeclReverseContext, AssignForwardContext,
-    AssignReverseContext, IfStatementContext, WhileLoopContext, ForLoopContext,
-    RangeLoopContext, RepeatTimesContext, RepeatUntilContext, SwapStmtContext,
-    DeclLetContext, SetToContext, AskExprContext, PredicateExprContext,
-    DivisibleExprContext, BetweenExprContext,
-    BreakStmtContext, ContinueStmtContext, IncStmtContext,
-    DecStmtContext, OpAssignContext, IncreaseByContext, DecreaseByContext,
-    AddToContext, TakeFromContext, MultiplyByContext, DivideByContext,
-    DoubleStmtContext, HalveStmtContext, PrintStatementContext,
-    ReturnStatementContext, ParenExprContext, CastExprContext,
-    BuiltinExprContext, NegExprContext, SquaredExprContext, NotExprContext, PowExprContext,
-    MulExprContext, AddExprContext, SubFromExprContext, RelExprContext,
-    EqExprContext, AndExprContext, OrExprContext, IdExprContext,
-    IntExprContext, FloatExprContext, StringExprContext, BoolExprContext,
+    BlockContext, DeclForwardContext, DeclReverseContext, DeclLetContext,
+    DeclSizedContext, DeclListIsContext, AssignForwardContext,
+    AssignReverseContext, SetToContext, SwapStmtContext, TargetContext,
+    NameTargetContext, IndexTargetContext, OrdinalTargetContext,
+    IfStatementContext, WhileLoopContext, ForLoopContext, RangeLoopContext,
+    ForEachLoopContext, RepeatTimesContext, RepeatUntilContext,
+    BreakStmtContext, ContinueStmtContext, IncStmtContext, DecStmtContext,
+    OpAssignContext, IncreaseByContext, DecreaseByContext, AddToContext,
+    TakeFromContext, MultiplyByContext, DivideByContext, DoubleStmtContext,
+    HalveStmtContext, PushToContext, InsertIntoContext, PushCallContext,
+    InsertCallContext, PopCallContext, PrintStatementContext,
+    ReturnStatementContext, ParenExprContext, IndexExprContext,
+    CastExprContext, BuiltinExprContext, OrdinalExprContext, PopExprContext,
+    AskExprContext, NegExprContext, SquaredExprContext, NotExprContext,
+    PowExprContext, MulExprContext, AddExprContext, SubFromExprContext,
+    PredicateExprContext, DivisibleExprContext, BetweenExprContext,
+    InExprContext, ContainsExprContext, RelExprContext, EqExprContext,
+    AndExprContext, OrExprContext, IdExprContext, IntExprContext,
+    FloatExprContext, StringExprContext, BoolExprContext, ListExprContext,
     InputExprContext, CallExprContext, FunctionCallContext, ExpressionContext,
 } from './gen/VoxParser.js';
-import { canonical, BUILTINS, builtinNameOf } from './SemanticAnalyzer.js';
+import { BUILTINS, builtinNameOf, typeName, isList, elementOf } from './SemanticAnalyzer.js';
 
 /** Where `stop` and `skip` jump to inside the innermost loop. */
 interface LoopLabels {
@@ -26,11 +31,19 @@ interface LoopLabels {
 }
 
 /**
+ * A resolved assignment target: a variable, or an item of a list whose base
+ * and index operands have already been evaluated.
+ */
+type Place =
+    | { kind: 'name'; name: string }
+    | { kind: 'item'; list: string; index: string };
+
+/**
  * Lowers a Vox parse tree into the flat, line-oriented IR that IRExecutor
  * runs. A direct port of the Java IRBuilder: both engines must emit identical
  * IR for the same source.
  *
- * Every expression visitor returns an operand: a literal, a variable name or
+ * Every expression visitor returns an operand: a literal, a variable name, or
  * the name of a freshly allocated temporary.
  */
 export class IRBuilder extends VoxVisitor<string | null> {
@@ -98,7 +111,7 @@ export class IRBuilder extends VoxVisitor<string | null> {
         if (ctx.expression()) {
             this.emit(`set ${name} ${this.visit(ctx.expression())}`);
         } else {
-            this.emit(`set ${name} ${defaultValue(ctx.datatype().getText())}`);
+            this.emitDefault(name, typeName(ctx.datatype()));
         }
         return null;
     };
@@ -113,27 +126,91 @@ export class IRBuilder extends VoxVisitor<string | null> {
         return null;
     };
 
+    /** `integer xs[5]` fills five defaults; `integer xs[]` is a new empty list. */
+    visitDeclSized = (ctx: DeclSizedContext): null => {
+        const name = ctx.ID().getText();
+        if (ctx._init) {
+            this.emit(`set ${name} ${this.visit(ctx._init)}`);
+        } else if (ctx._size) {
+            this.emit(`list_fill ${name} ${this.visit(ctx._size)} ${irType(typeName(ctx.datatype()))}`);
+        } else {
+            this.emit('list ' + name);
+        }
+        return null;
+    };
+
+    visitDeclListIs = (ctx: DeclListIsContext): null => {
+        const name = ctx.ID().getText();
+        if (ctx._init) this.emit(`set ${name} ${this.visit(ctx._init)}`);
+        else this.emit('list ' + name);
+        return null;
+    };
+
+    /** A variable declared without a value starts at its type's default. */
+    private emitDefault(name: string, type: string): void {
+        if (isList(type)) this.emit('list ' + name);
+        else this.emit(`set ${name} ${defaultLiteral(type)}`);
+    }
+
+    // --------------------------------------------------------- assignments --
+
     visitAssignForward = (ctx: AssignForwardContext): null => {
-        this.emit(`set ${ctx.ID().getText()} ${this.visit(ctx.expression())}`);
+        const value = this.visit(ctx.expression())!;
+        this.store(this.place(ctx.target()), value);
         return null;
     };
 
     visitAssignReverse = (ctx: AssignReverseContext): null => {
-        this.emit(`set ${ctx.ID().getText()} ${this.visit(ctx.expression())}`);
+        const value = this.visit(ctx.expression())!;
+        this.store(this.place(ctx.target()), value);
         return null;
     };
 
     visitSetTo = (ctx: SetToContext): null => {
-        this.emit(`set ${ctx.ID().getText()} ${this.visit(ctx.expression())}`);
+        const value = this.visit(ctx.expression())!;
+        this.store(this.place(ctx.target()), value);
         return null;
     };
 
+    /**
+     * Evaluates a target down to somewhere a value can be read or written:
+     * a variable name, or a list operand plus an index operand. `2nd item of
+     * xs` is xs with index 1.
+     */
+    private place(target: TargetContext): Place {
+        if (target instanceof NameTargetContext) {
+            return { kind: 'name', name: target.ID().getText() };
+        }
+        if (target instanceof IndexTargetContext) {
+            const list = this.load(this.place(target.target()));
+            const index = this.visit(target.expression())!;
+            return { kind: 'item', list, index };
+        }
+        const ordinal = target as OrdinalTargetContext;
+        const list = this.load(this.place(ordinal.target()));
+        return { kind: 'item', list, index: String(ordinalIndex(ordinal.ORDINAL().getText())) };
+    }
+
+    /** Reads a place; a variable is its own operand, an item needs a fetch. */
+    private load(p: Place): string {
+        if (p.kind === 'name') return p.name;
+        const dest = this.newTemp();
+        this.emit(`list_get ${dest} ${p.list} ${p.index}`);
+        return dest;
+    }
+
+    private store(p: Place, value: string): void {
+        if (p.kind === 'name') this.emit(`set ${p.name} ${value}`);
+        else this.emit(`list_set ${p.list} ${p.index} ${value}`);
+    }
+
     // ------------------------------------------------------------ updates --
     // `n += x` and every spoken spelling of it become one instruction whose
-    // destination is also its first operand: `add n n x`.
+    // destination is also its first operand: `add n n x`. An item update
+    // fetches, updates the temporary, and stores it back.
 
-    visitIncStmt = (ctx: IncStmtContext): null => this.update('add', ctx.ID().getText(), '1');
-    visitDecStmt = (ctx: DecStmtContext): null => this.update('sub', ctx.ID().getText(), '1');
+    visitIncStmt = (ctx: IncStmtContext): null => this.update('add', ctx.target(), '1');
+    visitDecStmt = (ctx: DecStmtContext): null => this.update('sub', ctx.target(), '1');
 
     visitOpAssign = (ctx: OpAssignContext): null => {
         const op = ctx._op.type === VoxParser.ADD_ASSIGN ? 'add'
@@ -141,38 +218,144 @@ export class IRBuilder extends VoxVisitor<string | null> {
             : ctx._op.type === VoxParser.MUL_ASSIGN ? 'mul'
             : ctx._op.type === VoxParser.DIV_ASSIGN ? 'div'
             : ctx._op.type === VoxParser.MOD_ASSIGN ? 'mod' : 'power';
-        return this.update(op, ctx.ID().getText(), this.visit(ctx.expression())!);
+        return this.update(op, ctx.target(), this.visit(ctx.expression())!);
     };
 
     visitIncreaseBy = (ctx: IncreaseByContext): null =>
-        this.update('add', ctx.ID().getText(), this.visit(ctx.expression())!);
+        this.update('add', ctx.target(), this.visit(ctx.expression())!);
     visitDecreaseBy = (ctx: DecreaseByContext): null =>
-        this.update('sub', ctx.ID().getText(), this.visit(ctx.expression())!);
+        this.update('sub', ctx.target(), this.visit(ctx.expression())!);
     visitAddTo = (ctx: AddToContext): null =>
-        this.update('add', ctx.ID().getText(), this.visit(ctx.expression())!);
+        this.update('add', ctx.target(), this.visit(ctx.expression())!);
     visitTakeFrom = (ctx: TakeFromContext): null =>
-        this.update('sub', ctx.ID().getText(), this.visit(ctx.expression())!);
+        this.update('sub', ctx.target(), this.visit(ctx.expression())!);
     visitMultiplyBy = (ctx: MultiplyByContext): null =>
-        this.update('mul', ctx.ID().getText(), this.visit(ctx.expression())!);
+        this.update('mul', ctx.target(), this.visit(ctx.expression())!);
     visitDivideBy = (ctx: DivideByContext): null =>
-        this.update('div', ctx.ID().getText(), this.visit(ctx.expression())!);
-    visitDoubleStmt = (ctx: DoubleStmtContext): null => this.update('mul', ctx.ID().getText(), '2');
-    visitHalveStmt = (ctx: HalveStmtContext): null => this.update('div', ctx.ID().getText(), '2');
+        this.update('div', ctx.target(), this.visit(ctx.expression())!);
+    visitDoubleStmt = (ctx: DoubleStmtContext): null => this.update('mul', ctx.target(), '2');
+    visitHalveStmt = (ctx: HalveStmtContext): null => this.update('div', ctx.target(), '2');
 
-    private update(op: string, name: string, operand: string): null {
-        this.emit(`${op} ${name} ${name} ${operand}`);
+    private update(op: string, target: TargetContext, operand: string): null {
+        const p = this.place(target);
+        if (p.kind === 'name') {
+            this.emit(`${op} ${p.name} ${p.name} ${operand}`);
+            return null;
+        }
+        const current = this.load(p);
+        this.emit(`${op} ${current} ${current} ${operand}`);
+        this.store(p, current);
         return null;
     }
 
     /** Swap through a temporary: three moves, no arithmetic. */
     visitSwapStmt = (ctx: SwapStmtContext): null => {
-        const a = ctx.ID(0).getText();
-        const b = ctx.ID(1).getText();
+        const a = this.place(ctx.target(0));
+        const b = this.place(ctx.target(1));
+        const first = this.load(a);
+        const second = this.load(b);
         const t = this.newTemp();
-        this.emit(`set ${t} ${a}`);
-        this.emit(`set ${a} ${b}`);
-        this.emit(`set ${b} ${t}`);
+        this.emit(`set ${t} ${first}`);
+        this.store(a, second);
+        this.store(b, t);
         return null;
+    };
+
+    // -------------------------------------------------------------- lists --
+
+    visitPushTo = (ctx: PushToContext): null => {
+        const value = this.visit(ctx.expression(0));
+        const list = this.visit(ctx.expression(1));
+        if (ctx.AT()) {
+            this.emit(`list_insert ${list} ${this.visit(ctx.expression(2))} ${value}`);
+        } else {
+            this.emit(`list_push ${list} ${value}`);
+        }
+        return null;
+    };
+
+    visitInsertInto = (ctx: InsertIntoContext): null => {
+        const value = this.visit(ctx.expression(0));
+        const list = this.visit(ctx.expression(1));
+        const index = this.visit(ctx.expression(2));
+        this.emit(`list_insert ${list} ${index} ${value}`);
+        return null;
+    };
+
+    visitPopExpr = (ctx: PopExprContext): string => {
+        const list = this.visit(ctx.expression(0));
+        const index = ctx.AT() ? ' ' + this.visit(ctx.expression(1)) : '';
+        const dest = this.newTemp();
+        this.emit(`list_pop ${dest} ${list}${index}`);
+        return dest;
+    };
+
+    // The call spellings: push(xs, v), insert(xs, i, v), pop(xs), pop(xs, i).
+
+    visitPushCall = (ctx: PushCallContext): null => {
+        const list = this.visit(ctx.expression(0));
+        const value = this.visit(ctx.expression(1));
+        this.emit(`list_push ${list} ${value}`);
+        return null;
+    };
+
+    visitInsertCall = (ctx: InsertCallContext): null => {
+        const list = this.visit(ctx.expression(0));
+        const index = this.visit(ctx.expression(1));
+        const value = this.visit(ctx.expression(2));
+        this.emit(`list_insert ${list} ${index} ${value}`);
+        return null;
+    };
+
+    visitPopCall = (ctx: PopCallContext): string => {
+        const list = this.visit(ctx.expression(0));
+        const index = ctx.expression_list().length > 1 ? ' ' + this.visit(ctx.expression(1)) : '';
+        const dest = this.newTemp();
+        this.emit(`list_pop ${dest} ${list}${index}`);
+        return dest;
+    };
+
+    visitIndexExpr = (ctx: IndexExprContext): string => {
+        const list = this.visit(ctx.expression(0));
+        const index = this.visit(ctx.expression(1));
+        const dest = this.newTemp();
+        this.emit(`list_get ${dest} ${list} ${index}`);
+        return dest;
+    };
+
+    visitOrdinalExpr = (ctx: OrdinalExprContext): string => {
+        const list = this.visit(ctx.expression());
+        const dest = this.newTemp();
+        this.emit(`list_get ${dest} ${list} ${ordinalIndex(ctx.ORDINAL().getText())}`);
+        return dest;
+    };
+
+    visitListExpr = (ctx: ListExprContext): string => {
+        const items = ctx.expression_list().map(e => this.visit(e));
+        const dest = this.newTemp();
+        let line = 'list ' + dest;
+        for (const item of items) line += ' ' + item;
+        this.emit(line);
+        return dest;
+    };
+
+    visitInExpr = (ctx: InExprContext): string => {
+        const value = this.visit(ctx.expression(0));
+        const list = this.visit(ctx.expression(1));
+        const dest = this.newTemp();
+        this.emit(`list_has ${dest} ${list} ${value}`);
+        if (ctx._op.type !== VoxParser.NE) return dest;
+        const inverted = this.newTemp();
+        this.emit(`not ${inverted} ${dest}`);
+        return inverted;
+    };
+
+    visitContainsExpr = (ctx: ContainsExprContext): string => {
+        const list = this.visit(ctx.expression(0));
+        const value = this.visit(ctx.expression(1));
+        const dest = this.newTemp();
+        this.emit(`list_has ${dest} ${list} ${value}`);
+        return dest;
     };
 
     // ------------------------------------------------------------ control --
@@ -193,7 +376,7 @@ export class IRBuilder extends VoxVisitor<string | null> {
             this.visit(ctx._thenBlock);
             this.emit('goto ' + end);
             this.emit('label ' + elseLabel);
-            this.visit(otherwise); // a block or the next `if` in the chain
+            this.visit(otherwise); // a block, or the next `if` in the chain
             this.emit('label ' + end);
         }
         return null;
@@ -246,8 +429,7 @@ export class IRBuilder extends VoxVisitor<string | null> {
         const down = rc._dir.type === VoxParser.DOWN_TO;
         const compare = down ? 'ge' : rc._dir.type === VoxParser.UNTIL ? 'lt' : 'le';
 
-        // Every bound is evaluated before the loop variable is assigned, so
-        // `for i from 1 to i + 2` measures the outer i.
+        // Every bound is evaluated before the loop variable is assigned.
         const first = this.visit(rc._start);
         const limit = this.frozen(rc._limit);
         const step = rc._step ? this.frozen(rc._step) : '1';
@@ -262,6 +444,37 @@ export class IRBuilder extends VoxVisitor<string | null> {
         this.loops.pop();
         this.emit('label ' + cont);
         this.emit(`${down ? 'sub' : 'add'} ${name} ${name} ${step}`);
+        this.emit('goto ' + start);
+        this.emit('label ' + end);
+        return null;
+    };
+
+    /**
+     * `for each x in xs` walks the list by index. The length is re-read every
+     * turn, so items pushed inside the body are visited too.
+     */
+    visitForEachLoop = (ctx: ForEachLoopContext): null => {
+        const name = ctx.ID().getText();
+        const start = this.newLabel('foreach');
+        const end = this.newLabel('endforeach');
+        const cont = this.newLabel('foreachcont');
+
+        const list = this.frozen(ctx.expression());
+        const index = this.newTemp();
+        this.emit(`set ${index} 0`);
+
+        this.emit('label ' + start);
+        const length = this.newTemp();
+        this.emit(`builtin ${length} length ${list}`);
+        const cond = this.newTemp();
+        this.emit(`lt ${cond} ${index} ${length}`);
+        this.emit(`if_false ${cond} goto ${end}`);
+        this.emit(`list_get ${name} ${list} ${index}`);
+        this.loops.push({ breakLabel: end, continueLabel: cont });
+        this.visit(ctx.block());
+        this.loops.pop();
+        this.emit('label ' + cont);
+        this.emit(`add ${index} ${index} 1`);
         this.emit('goto ' + start);
         this.emit('label ' + end);
         return null;
@@ -360,7 +573,7 @@ export class IRBuilder extends VoxVisitor<string | null> {
     visitCastExpr = (ctx: CastExprContext): string => {
         const value = this.visit(ctx.expression());
         const dest = this.newTemp();
-        this.emit(`cast ${dest} ${value} ${canonical(ctx.datatype().getText())}`);
+        this.emit(`cast ${dest} ${value} ${typeName(ctx.datatype())}`);
         return dest;
     };
 
@@ -435,13 +648,19 @@ export class IRBuilder extends VoxVisitor<string | null> {
             this.emit(`${wantZero ? 'eq' : 'ne'} ${dest} ${m} 0`);
             return dest;
         }
+        if (pred === VoxParser.EMPTY) {
+            // Strings and lists alike: empty means length zero.
+            const length = this.newTemp();
+            this.emit(`builtin ${length} length ${value}`);
+            const dest = this.newTemp();
+            this.emit(`${negated ? 'ne' : 'eq'} ${dest} ${length} 0`);
+            return dest;
+        }
         const dest = this.newTemp();
         if (pred === VoxParser.POSITIVE) {
             this.emit(`${negated ? 'le' : 'gt'} ${dest} ${value} 0`);
-        } else if (pred === VoxParser.NEGATIVE) {
+        } else { // NEGATIVE
             this.emit(`${negated ? 'ge' : 'lt'} ${dest} ${value} 0`);
-        } else { // EMPTY
-            this.emit(`${negated ? 'ne' : 'eq'} ${dest} ${value} ""`);
         }
         return dest;
     };
@@ -541,6 +760,28 @@ export class IRBuilder extends VoxVisitor<string | null> {
     visitStringExpr = (ctx: StringExprContext): string => normalizeString(ctx.getText());
 }
 
+/** The literal a scalar variable starts with when declared without a value. */
+function defaultLiteral(type: string): string {
+    switch (type) {
+        case 'integer': return '0';
+        case 'float': return '0.0';
+        case 'boolean': return 'false';
+        case 'string':
+        case 'character': return '""';
+        default: return '0';
+    }
+}
+
+/** The IR spells list types without spaces: `list<list<integer>>`. */
+function irType(type: string): string {
+    return isList(type) ? `list<${irType(elementOf(type))}>` : type;
+}
+
+/** `1st` is index 0, `2nd` is 1, and so on. The checker validated the suffix. */
+function ordinalIndex(text: string): number {
+    return Number(text.replace(/[a-z]+$/, '')) - 1;
+}
+
 /**
  * The IR spells every string double-quoted, so a single-quoted source literal
  * is re-emitted with double quotes (escaping any it contains).
@@ -554,15 +795,4 @@ function normalizeString(text: string): string {
         out += c === '"' ? '\\"' : c;
     }
     return out + '"';
-}
-
-function defaultValue(datatype: string): string {
-    switch (canonical(datatype)) {
-        case 'integer': return '0';
-        case 'float': return '0.0';
-        case 'boolean': return 'false';
-        case 'string':
-        case 'character': return '""';
-        default: return '0';
-    }
 }

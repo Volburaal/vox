@@ -19,14 +19,16 @@ statement
     : variableDeclaration ';'   # declStmt
     | assignment ';'            # assignStmt
     | updateStatement ';'       # updateStmt
+    | pushStatement ';'         # pushStmt
     | ifStatement               # ifStmt
     | whileLoop                 # whileStmt
     | forLoop                   # forStmt
     | rangeLoop                 # rangeStmt
+    | forEachLoop               # forEachStmt
     | printStatement ';'        # printStmt
     | returnStatement ';'       # returnStmt
     | repeatLoop                # repeatStmt
-    | SWAP ID AND ID ';'        # swapStmt
+    | SWAP target AND target ';'  # swapStmt
     | BREAK ';'                 # breakStmt
     | CONTINUE ';'              # continueStmt
     | expression ';'            # exprStmt
@@ -56,44 +58,73 @@ repeatLoop     : REPEAT expression MUL block                  # repeatTimes
                | REPEAT block UNTIL '(' expression ')' ';'?   # repeatUntil
                ;
 
+// `for each score in scores { ... }` and the C++ spelling
+// `for (integer score : scores)`. The loop variable is a copy of the item and
+// the length is re-read every turn, so pushing inside the body extends the loop.
+forEachLoop    : FOR_EACH datatype? ID IN expression block
+               | FOR '(' datatype ID ':' expression ')' block
+               ;
+
 variableDeclaration
-    : DECL_START? datatype ID (ASSIGN expression)?   # declForward
-    | expression RASSIGN datatype ID                 # declReverse
-    | LET ID BE expression                           # declLet
+    : DECL_START? datatype ID (ASSIGN expression)?                                 # declForward
+    | expression RASSIGN datatype ID                                               # declReverse
+    | LET ID BE expression                                                         # declLet
+    // `integer xs[5]` is five defaults, `integer xs[]` is empty. The bracket
+    // after the name adds one list dimension, as in C.
+    | DECL_START? datatype ID '[' size=expression? ']' (ASSIGN init=expression)?  # declSized
+    | ID IS_A_LIST_OF datatype (ASSIGN init=expression)?                           # declListIs
     ;
 
 assignment
-    : ID ASSIGN expression        # assignForward
-    | expression RASSIGN ID       # assignReverse
-    | SET THE? ID TO expression   # setTo
+    : target ASSIGN expression        # assignForward
+    | expression RASSIGN target       # assignReverse
+    | SET THE? target TO expression   # setTo
+    ;
+
+// Anything that can be assigned to: a variable, an item by index, or an item
+// by position. Ordinals count from one, so `2nd item of xs` is xs[1].
+target
+    : ID                              # nameTarget
+    | target '[' expression ']'       # indexTarget
+    | ORDINAL ITEM_OF target          # ordinalTarget
     ;
 
 // In-place updates. These are statements, never expressions: `i++` has no
 // value, so `x <- i++` is a syntax error rather than a trap. Every spoken form
 // lowers to exactly the same IR as its symbolic twin.
 updateStatement
-    : INC ID                                  # incStmt
-    | ID INC                                  # incStmt
-    | INCREMENT THE? ID                       # incStmt
-    | ID IS_INCREMENTED                       # incStmt
-    | DEC ID                                  # decStmt
-    | ID DEC                                  # decStmt
-    | DECREMENT THE? ID                       # decStmt
-    | ID IS_DECREMENTED                       # decStmt
-    | ID op=(ADD_ASSIGN | SUB_ASSIGN | MUL_ASSIGN | DIV_ASSIGN | MOD_ASSIGN | POW_ASSIGN) expression
-                                              # opAssign
-    | INCREASE THE? ID BY expression          # increaseBy
-    | DECREASE THE? ID BY expression          # decreaseBy
-    | ADD_VERB expression TO THE? ID          # addTo
-    | expression IS_ADDED_TO THE? ID          # addTo
-    | SUBTRACT_VERB expression FROM THE? ID   # takeFrom
-    | expression IS_SUBTRACTED_FROM THE? ID   # takeFrom
-    | MULTIPLY THE? ID BY expression          # multiplyBy
-    | DIVIDE THE? ID BY expression            # divideBy
-    | DOUBLE THE? ID                          # doubleStmt
-    | ID IS_DOUBLED                           # doubleStmt
-    | HALVE THE? ID                           # halveStmt
-    | ID IS_HALVED                            # halveStmt
+    : INC target                                  # incStmt
+    | target INC                                  # incStmt
+    | INCREMENT THE? target                       # incStmt
+    | target IS_INCREMENTED                       # incStmt
+    | DEC target                                  # decStmt
+    | target DEC                                  # decStmt
+    | DECREMENT THE? target                       # decStmt
+    | target IS_DECREMENTED                       # decStmt
+    | target op=(ADD_ASSIGN | SUB_ASSIGN | MUL_ASSIGN | DIV_ASSIGN | MOD_ASSIGN | POW_ASSIGN) expression
+                                                  # opAssign
+    | INCREASE THE? target BY expression          # increaseBy
+    | DECREASE THE? target BY expression          # decreaseBy
+    | ADD_VERB expression TO THE? target          # addTo
+    | expression IS_ADDED_TO THE? target          # addTo
+    | SUBTRACT_VERB expression FROM THE? target   # takeFrom
+    | expression IS_SUBTRACTED_FROM THE? target   # takeFrom
+    | MULTIPLY THE? target BY expression          # multiplyBy
+    | DIVIDE THE? target BY expression            # divideBy
+    | DOUBLE THE? target                          # doubleStmt
+    | target IS_DOUBLED                           # doubleStmt
+    | HALVE THE? target                           # halveStmt
+    | target IS_HALVED                            # halveStmt
+    ;
+
+// Growing a list. `push x to xs` appends; `at i` inserts before item i, and
+// i may equal the length. Shrinking is `pop`, an expression, so the removed
+// item can be used.
+pushStatement
+    : PUSH expression TO THE? expression (AT expression)?      # pushTo
+    | INSERT expression INTO THE? expression AT expression     # insertInto
+    | PUSH '(' expression ',' expression ')'                   # pushCall
+    | INSERT '(' expression ',' expression ',' expression ')'  # insertCall
     ;
 
 printStatement  : PRINT '(' expression (',' expression)* ')'
@@ -109,9 +140,13 @@ functionCall    : ID '(' (expression (',' expression)*)? ')' ;
 // -(x squared).
 expression
     : '(' expression ')'                          # parenExpr
+    | expression '[' expression ']'               # indexExpr
     | expression AS datatype                      # castExpr
     | expression op=(SQUARED | CUBED)             # squaredExpr
     | builtinName expression                      # builtinExpr
+    | ORDINAL ITEM_OF expression                  # ordinalExpr
+    | POP '(' expression (',' expression)? ')'    # popCall
+    | POP expression (AT expression)?             # popExpr
     | ASK expression                              # askExpr
     | <assoc=right> expression POW expression     # powExpr
     | SUB expression                              # negExpr
@@ -123,6 +158,8 @@ expression
     | expression op=(EQ|NE) pred=(EVEN | ODD | POSITIVE | NEGATIVE | EMPTY)   # predicateExpr
     | expression op=(EQ|NE) DIVISIBLE BY expression                           # divisibleExpr
     | expression op=(EQ|NE) BETWEEN low=expression AND high=expression        # betweenExpr
+    | expression op=(EQ|NE) IN expression                                     # inExpr
+    | expression CONTAINS expression                                          # containsExpr
     | expression op=(LE|GE|LT|GT) expression      # relExpr
     | expression op=(EQ|NE) expression            # eqExpr
     | expression AND expression                   # andExpr
@@ -134,14 +171,22 @@ expression
     | FLOAT                                       # floatExpr
     | STRING                                      # stringExpr
     | BOOL                                        # boolExpr
+    | '[' (expression (',' expression)*)? ']'     # listExpr
     ;
 
 // Spoken forms of the builtin functions. The symbolic forms (sqrt(x), abs(x),
 // round(x), floor(x), ceiling(x), min(a, b), max(a, b), length(s),
 // uppercase(s), lowercase(s)) are ordinary calls resolved by name.
-builtinName : SQRT_OF | ABS_OF | LENGTH_OF | FLOOR_OF | CEIL_OF | UPPER_OF | LOWER_OF ;
+builtinName : SQRT_OF | ABS_OF | LENGTH_OF | FLOOR_OF | CEIL_OF | UPPER_OF | LOWER_OF | COPY_OF ;
 
-datatype : DATATYPE_INT | DATATYPE_FLOAT | DATATYPE_BOOL | DATATYPE_CHAR | DATATYPE_STRING ;
+// `list<integer>`, `list of integers` and `integer[]` are the same type, and
+// they nest: `integer[][]` is a list of lists.
+datatype
+    : LIST LT datatype GT                                                                        # listType
+    | LIST_OF datatype                                                                           # listType
+    | datatype '[' ']'                                                                           # listType
+    | scalar=(DATATYPE_INT | DATATYPE_FLOAT | DATATYPE_BOOL | DATATYPE_CHAR | DATATYPE_STRING)   # scalarType
+    ;
 
 // ---------------------------------------------- lexer ----------------------------------------------
 
@@ -190,6 +235,22 @@ NEGATIVE  : 'negative' ;
 EMPTY     : 'empty' ;
 DIVISIBLE : 'divisible' ;
 BETWEEN   : 'between' ;
+
+// Lists. `item of`, `copy of` and `list of` are single tokens, so `item`,
+// `copy` and `list` on their own stay usable as names.
+LIST         : 'list' ;
+LIST_OF      : 'list' S 'of' ;
+IS_A_LIST_OF : 'is' S 'a' S 'list' S 'of' ;
+ITEM_OF      : ('item' | 'value') S 'of' ;
+COPY_OF      : 'copy' S 'of' ;
+FOR_EACH     : 'for' S ('each' | 'every') ;
+IN           : 'in' ;
+AT           : 'at' ;
+PUSH         : 'push' ;
+INSERT       : 'insert' ;
+INTO         : 'into' ;
+POP          : 'pop' ;
+CONTAINS     : 'contains' ;
 
 // In-place updates: symbolic ...
 INC        : '++' ;
@@ -257,15 +318,18 @@ AND     : '&&' | '&' | 'and' ;
 OR      : '||' | '|' | 'or' ;
 NOT     : '~'  | '!' | 'not' ;
 
-DATATYPE_INT    : 'int' | 'integer' | 'number' | 'whole' S 'number' ;
-DATATYPE_FLOAT  : 'float' | 'floating' S 'point' S 'number' ;
-DATATYPE_BOOL   : 'bool' | 'boolean' S 'number' | 'boolean' ;
-DATATYPE_CHAR   : 'character' | 'char' ;
-DATATYPE_STRING : 'string' | 'character' S 'string' | 'varchar' ;
+// Plurals are accepted so `a list of integers` reads as written.
+DATATYPE_INT    : 'int' | 'integer' | 'integers' | 'number' | 'numbers' | 'whole' S 'number' | 'whole' S 'numbers' ;
+DATATYPE_FLOAT  : 'float' | 'floats' | 'floating' S 'point' S 'number' | 'floating' S 'point' S 'numbers' ;
+DATATYPE_BOOL   : 'bool' | 'bools' | 'boolean' S 'number' | 'boolean' S 'numbers' | 'boolean' | 'booleans' ;
+DATATYPE_CHAR   : 'character' | 'characters' | 'char' | 'chars' ;
+DATATYPE_STRING : 'string' | 'strings' | 'character' S 'string' | 'character' S 'strings' | 'varchar' ;
 
 BOOL   : 'true' | 'false' ;
-FLOAT  : [0-9]+ '.' [0-9]+ ;
-INT    : [0-9]+ ;
+FLOAT   : [0-9]+ '.' [0-9]+ ;
+// `1st`, `2nd`, `3rd`, `4th`... The checker rejects a wrong suffix.
+ORDINAL : [0-9]+ ('st' | 'nd' | 'rd' | 'th') ;
+INT     : [0-9]+ ;
 // Either quote style; escapes: \n \t \r \" \' \\
 STRING : '"' (~["\\\r\n] | '\\' .)* '"'
        | '\'' (~['\\\r\n] | '\\' .)* '\''
