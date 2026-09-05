@@ -1,0 +1,6 @@
+main {
+    integer n <- 1;
+    if (true) {
+        integer n <- 2;
+    }
+}

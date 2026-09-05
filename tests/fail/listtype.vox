@@ -1,0 +1,4 @@
+main {
+    integer[] xs;
+    push "a" to xs;
+}

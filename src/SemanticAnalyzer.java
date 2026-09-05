@@ -1,6 +1,7 @@
 import java.util.*;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.Token;
+import org.antlr.v4.runtime.tree.TerminalNode;
 
 /**
  * Name resolution and type checking.
@@ -12,6 +13,9 @@ import org.antlr.v4.runtime.Token;
  *
  * Diagnostic messages are kept byte-for-byte identical to the TypeScript
  * engine's so the shared regression suite can assert on them for both.
+ *
+ * Types are strings: the five scalars, "list of <type>" (nesting freely),
+ * "any" for values only known at run time (input), "void" and "error".
  */
 public class SemanticAnalyzer extends VoxBaseVisitor<String> {
 
@@ -25,10 +29,11 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         }
     }
 
-    /** What a builtin accepts ("num" or "string" per parameter) and returns. */
+    /** What a builtin accepts per parameter, and what it returns. */
     static final class BuiltinSpec {
+        /** "num", "string", "sized" (string or list) or "list", per parameter. */
         final String[] params;
-        /** A fixed type or "numeric" to follow the arguments (float if any float). */
+        /** A fixed type, "numeric" (float if any float) or "same" (the argument's type). */
         final String result;
         BuiltinSpec(String result, String... params) {
             this.result = result;
@@ -50,9 +55,10 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         BUILTINS.put("ceiling",   new BuiltinSpec("integer", "num"));
         BUILTINS.put("min",       new BuiltinSpec("numeric", "num", "num"));
         BUILTINS.put("max",       new BuiltinSpec("numeric", "num", "num"));
-        BUILTINS.put("length",    new BuiltinSpec("integer", "string"));
+        BUILTINS.put("length",    new BuiltinSpec("integer", "sized"));
         BUILTINS.put("uppercase", new BuiltinSpec("string",  "string"));
         BUILTINS.put("lowercase", new BuiltinSpec("string",  "string"));
+        BUILTINS.put("copy",      new BuiltinSpec("same",    "list"));
     }
 
     /** Maps a spoken builtin token onto its symbolic name. */
@@ -63,6 +69,7 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         if (ctx.FLOOR_OF() != null) return "floor";
         if (ctx.CEIL_OF() != null) return "ceiling";
         if (ctx.UPPER_OF() != null) return "uppercase";
+        if (ctx.COPY_OF() != null) return "copy";
         return "lowercase";
     }
 
@@ -95,7 +102,6 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
     private void enterScope() { scopes.push(new LinkedHashMap<>()); }
     private void exitScope()  { if (!scopes.isEmpty()) scopes.pop(); }
 
-    /** Declared in the innermost scope only, so shadowing an outer name is legal. */
     private boolean declaredHere(String name) {
         return !scopes.isEmpty() && scopes.peek().containsKey(name);
     }
@@ -117,6 +123,21 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
 
     private void define(String name, String type) {
         if (!scopes.isEmpty()) scopes.peek().put(name, type);
+    }
+
+    /**
+     * Declares a variable. A name cannot be reused while one is visible - in
+     * this scope or any enclosing one - so no variable is ever shadowed.
+     */
+    private void declareVariable(ParserRuleContext ctx, String name, String type, String valueType) {
+        if (declaredHere(name)) {
+            error(ctx, "variable '" + name + "' is already declared in this scope");
+        } else if (isVisible(name)) {
+            error(ctx, "variable '" + name + "' is already declared in an enclosing scope");
+        } else {
+            define(name, type);
+        }
+        if (valueType != null) checkAssignable(ctx, type, valueType, name);
     }
 
     // ------------------------------------------------------------ program --
@@ -161,15 +182,15 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         List<String> out = new ArrayList<>();
         if (ctx != null) {
             for (VoxParser.ParameterContext p : ctx.parameter()) {
-                out.add(canonical(p.datatype().getText()));
+                out.add(typeName(p.datatype()));
             }
         }
         return out;
     }
 
-    /** "void" for procedures, otherwise the canonical datatype. */
+    /** "void" for procedures, otherwise the type written. */
     private static String returnTypeOf(VoxParser.ReturnTypeContext ctx) {
-        return ctx.VOID() != null ? "void" : canonical(ctx.datatype().getText());
+        return ctx.VOID() != null ? "void" : typeName(ctx.datatype());
     }
 
     @Override
@@ -188,11 +209,11 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
                 if (declaredHere(name)) {
                     error(p, "duplicate parameter '" + name + "'");
                 } else {
-                    define(name, canonical(p.datatype().getText()));
+                    define(name, typeName(p.datatype()));
                 }
             }
         }
-        // The body's own scope, so a local may shadow a parameter.
+        // The body's own scope; its locals cannot reuse a parameter's name.
         visit(ctx.block());
         exitScope();
         currentName = null;
@@ -220,18 +241,15 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
 
     @Override
     public String visitDeclForward(VoxParser.DeclForwardContext ctx) {
-        String declared = ctx.datatype().getText();
-        String name = ctx.ID().getText();
-        String valueType = null;
-        if (ctx.expression() != null) valueType = visit(ctx.expression());
-        declareVariable(ctx, name, declared, valueType);
+        String valueType = ctx.expression() != null ? visit(ctx.expression()) : null;
+        declareVariable(ctx, ctx.ID().getText(), typeName(ctx.datatype()), valueType);
         return null;
     }
 
     @Override
     public String visitDeclReverse(VoxParser.DeclReverseContext ctx) {
         String valueType = visit(ctx.expression());
-        declareVariable(ctx, ctx.ID().getText(), ctx.datatype().getText(), valueType);
+        declareVariable(ctx, ctx.ID().getText(), typeName(ctx.datatype()), valueType);
         return null;
     }
 
@@ -239,23 +257,40 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
     @Override
     public String visitDeclLet(VoxParser.DeclLetContext ctx) {
         String valueType = visit(ctx.expression());
-        String name = ctx.ID().getText();
-        if (declaredHere(name)) {
-            error(ctx, "variable '" + name + "' is already declared in this scope");
-        } else {
-            define(name, valueType == null || "error".equals(valueType) ? "any" : valueType);
+        if (listOf("any").equals(valueType)) {
+            error(ctx, "the type of [] cannot be inferred; declare the list with a type instead");
         }
+        if (valueType == null || "error".equals(valueType)) valueType = "any";
+        declareVariable(ctx, ctx.ID().getText(), valueType, null);
         return null;
     }
 
-    private void declareVariable(ParserRuleContext ctx, String name,
-                                 String declaredType, String valueType) {
-        if (declaredHere(name)) {
-            error(ctx, "variable '" + name + "' is already declared in this scope");
-        } else {
-            define(name, canonical(declaredType));
+    /** `integer xs[5]`: a list of that many defaults; `integer xs[]`: empty. */
+    @Override
+    public String visitDeclSized(VoxParser.DeclSizedContext ctx) {
+        String type = listOf(typeName(ctx.datatype()));
+        if (ctx.size != null) {
+            String sizeType = visit(ctx.size);
+            if (sizeType != null && !"error".equals(sizeType) && !"any".equals(sizeType)
+                    && !"integer".equals(sizeType)) {
+                error(ctx.size, "list size must be an integer but got " + sizeType);
+            }
         }
-        if (valueType != null) checkAssignable(ctx, canonical(declaredType), valueType, name);
+        String valueType = ctx.init != null ? visit(ctx.init) : null;
+        if (ctx.size != null && ctx.init != null) {
+            error(ctx, "give a list a size or an initial value, not both");
+        }
+        declareVariable(ctx, ctx.ID().getText(), type, valueType);
+        return null;
+    }
+
+    /** `xs is a list of integers`. */
+    @Override
+    public String visitDeclListIs(VoxParser.DeclListIsContext ctx) {
+        String type = listOf(typeName(ctx.datatype()));
+        String valueType = ctx.init != null ? visit(ctx.init) : null;
+        declareVariable(ctx, ctx.ID().getText(), type, valueType);
+        return null;
     }
 
     // --------------------------------------------------------- assignments --
@@ -263,67 +298,108 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
     @Override
     public String visitAssignForward(VoxParser.AssignForwardContext ctx) {
         String valueType = visit(ctx.expression());
-        checkAssignTarget(ctx, ctx.ID().getText(), valueType);
+        checkAssignTarget(ctx, ctx.target(), valueType);
         return null;
     }
 
     @Override
     public String visitAssignReverse(VoxParser.AssignReverseContext ctx) {
         String valueType = visit(ctx.expression());
-        checkAssignTarget(ctx, ctx.ID().getText(), valueType);
+        checkAssignTarget(ctx, ctx.target(), valueType);
         return null;
     }
 
     @Override
     public String visitSetTo(VoxParser.SetToContext ctx) {
         String valueType = visit(ctx.expression());
-        checkAssignTarget(ctx, ctx.ID().getText(), valueType);
+        checkAssignTarget(ctx, ctx.target(), valueType);
         return null;
+    }
+
+    private void checkAssignTarget(ParserRuleContext ctx, VoxParser.TargetContext target, String valueType) {
+        String targetType = typeOfTarget(target);
+        if (targetType == null) return; // already reported
+        checkAssignable(ctx, targetType, valueType, target.getText());
+    }
+
+    /**
+     * The type a target holds: a variable's declared type, or a list's item
+     * type for `xs[i]` and `2nd item of xs`. Null once a problem is reported.
+     */
+    private String typeOfTarget(VoxParser.TargetContext target) {
+        if (target instanceof VoxParser.NameTargetContext) {
+            String name = ((VoxParser.NameTargetContext) target).ID().getText();
+            if (!isVisible(name)) {
+                error(target, "variable '" + name + "' is not declared");
+                return null;
+            }
+            return typeOf(name);
+        }
+        if (target instanceof VoxParser.IndexTargetContext) {
+            VoxParser.IndexTargetContext indexed = (VoxParser.IndexTargetContext) target;
+            String base = typeOfTarget(indexed.target());
+            requireIndex(indexed.expression(), visit(indexed.expression()));
+            return itemTypeOf(indexed, base);
+        }
+        VoxParser.OrdinalTargetContext ordinal = (VoxParser.OrdinalTargetContext) target;
+        checkOrdinal(ordinal, ordinal.ORDINAL());
+        return itemTypeOf(ordinal, typeOfTarget(ordinal.target()));
+    }
+
+    /** The item type of a list type; reports when the base is not a list. */
+    private String itemTypeOf(ParserRuleContext ctx, String base) {
+        if (base == null || "error".equals(base)) return null;
+        if ("any".equals(base)) return "any";
+        if (!isList(base)) {
+            error(ctx, "cannot index " + base + "; only lists have items");
+            return null;
+        }
+        return elementOf(base);
+    }
+
+    private void requireIndex(ParserRuleContext ctx, String t) {
+        if (t == null || "error".equals(t) || "any".equals(t) || "integer".equals(t)) return;
+        error(ctx, "index must be an integer but got " + t);
+    }
+
+    /** `1st`, `2nd`, `3rd`, `4th`...: the suffix must be the English one. */
+    private void checkOrdinal(ParserRuleContext ctx, TerminalNode token) {
+        String text = token.getText();
+        int n = Integer.parseInt(text.replaceAll("[a-z]+$", ""));
+        if (n == 0) {
+            error(ctx, "there is no 0th item; the first is the 1st, or index 0");
+            return;
+        }
+        String want = ordinalSuffix(n);
+        if (!text.endsWith(want)) {
+            error(ctx, "'" + text + "' should be '" + n + want + "'");
+        }
+    }
+
+    /** Reports a narrowing or otherwise lossy assignment as a warning, not an error. */
+    private void checkAssignable(ParserRuleContext ctx, String target, String value, String name) {
+        if (target == null || value == null) return;
+        switch (fits(target, value)) {
+            case "ok": return;
+            case "narrow":
+                warn(ctx, "implicit cast float -> integer assigning to '" + name + "' loses precision");
+                return;
+            default:
+                error(ctx, "cannot assign " + value + " to " + target + " '" + name + "'");
+        }
     }
 
     /** Each value must fit the other variable's declared type. */
     @Override
     public String visitSwapStmt(VoxParser.SwapStmtContext ctx) {
-        String a = ctx.ID(0).getText();
-        String b = ctx.ID(1).getText();
-        boolean missing = false;
-        for (String name : new String[] { a, b }) {
-            if (!isVisible(name)) {
-                error(ctx, "variable '" + name + "' is not declared");
-                missing = true;
-            }
-        }
-        if (missing) return null;
-        checkAssignable(ctx, typeOf(a), typeOf(b), a);
-        checkAssignable(ctx, typeOf(b), typeOf(a), b);
+        VoxParser.TargetContext a = ctx.target(0);
+        VoxParser.TargetContext b = ctx.target(1);
+        String ta = typeOfTarget(a);
+        String tb = typeOfTarget(b);
+        if (ta == null || tb == null) return null;
+        checkAssignable(ctx, ta, tb, a.getText());
+        checkAssignable(ctx, tb, ta, b.getText());
         return null;
-    }
-
-    private void checkAssignTarget(ParserRuleContext ctx, String name, String valueType) {
-        if (!isVisible(name)) {
-            error(ctx, "variable '" + name + "' is not declared");
-            return;
-        }
-        checkAssignable(ctx, typeOf(name), valueType, name);
-    }
-
-    /** Reports a narrowing or otherwise lossy assignment as a warning, not an error. */
-    private void checkAssignable(ParserRuleContext ctx, String target,
-                                 String value, String name) {
-        if (target == null || value == null) return;
-        if (value.equals("error") || target.equals(value)) return;
-        // input() is dynamic: the runtime coerces it to whatever fits.
-        if (value.equals("any") || target.equals("any")) return;
-
-        boolean targetNum = isNumeric(target);
-        boolean valueNum = isNumeric(value);
-        if (targetNum && valueNum) {
-            if (target.equals("integer") && value.equals("float")) {
-                warn(ctx, "implicit cast float -> integer assigning to '" + name + "' loses precision");
-            }
-            return; // integer -> float widens silently
-        }
-        error(ctx, "cannot assign " + value + " to " + target + " '" + name + "'");
     }
 
     private static boolean isNumeric(String t) {
@@ -335,80 +411,223 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
 
     @Override
     public String visitIncStmt(VoxParser.IncStmtContext ctx) {
-        return checkUpdate(ctx, ctx.ID().getText(), "++", "integer");
+        return checkUpdate(ctx, ctx.target(), "++", "integer");
     }
 
     @Override
     public String visitDecStmt(VoxParser.DecStmtContext ctx) {
-        return checkUpdate(ctx, ctx.ID().getText(), "--", "integer");
+        return checkUpdate(ctx, ctx.target(), "--", "integer");
     }
 
     @Override
     public String visitOpAssign(VoxParser.OpAssignContext ctx) {
-        return checkUpdate(ctx, ctx.ID().getText(), ctx.op.getText(), visit(ctx.expression()));
+        return checkUpdate(ctx, ctx.target(), ctx.op.getText(), visit(ctx.expression()));
     }
 
     @Override
     public String visitIncreaseBy(VoxParser.IncreaseByContext ctx) {
-        return checkUpdate(ctx, ctx.ID().getText(), "+=", visit(ctx.expression()));
+        return checkUpdate(ctx, ctx.target(), "+=", visit(ctx.expression()));
     }
 
     @Override
     public String visitDecreaseBy(VoxParser.DecreaseByContext ctx) {
-        return checkUpdate(ctx, ctx.ID().getText(), "-=", visit(ctx.expression()));
+        return checkUpdate(ctx, ctx.target(), "-=", visit(ctx.expression()));
     }
 
     @Override
     public String visitAddTo(VoxParser.AddToContext ctx) {
-        return checkUpdate(ctx, ctx.ID().getText(), "+=", visit(ctx.expression()));
+        return checkUpdate(ctx, ctx.target(), "+=", visit(ctx.expression()));
     }
 
     @Override
     public String visitTakeFrom(VoxParser.TakeFromContext ctx) {
-        return checkUpdate(ctx, ctx.ID().getText(), "-=", visit(ctx.expression()));
+        return checkUpdate(ctx, ctx.target(), "-=", visit(ctx.expression()));
     }
 
     @Override
     public String visitMultiplyBy(VoxParser.MultiplyByContext ctx) {
-        return checkUpdate(ctx, ctx.ID().getText(), "*=", visit(ctx.expression()));
+        return checkUpdate(ctx, ctx.target(), "*=", visit(ctx.expression()));
     }
 
     @Override
     public String visitDivideBy(VoxParser.DivideByContext ctx) {
-        return checkUpdate(ctx, ctx.ID().getText(), "/=", visit(ctx.expression()));
+        return checkUpdate(ctx, ctx.target(), "/=", visit(ctx.expression()));
     }
 
     @Override
     public String visitDoubleStmt(VoxParser.DoubleStmtContext ctx) {
-        return checkUpdate(ctx, ctx.ID().getText(), "double", "integer");
+        return checkUpdate(ctx, ctx.target(), "double", "integer");
     }
 
     @Override
     public String visitHalveStmt(VoxParser.HalveStmtContext ctx) {
-        return checkUpdate(ctx, ctx.ID().getText(), "halve", "integer");
+        return checkUpdate(ctx, ctx.target(), "halve", "integer");
     }
 
-    /** `name op= value` is checked exactly like `name = name op value`. */
-    private String checkUpdate(ParserRuleContext ctx, String name, String op, String valueType) {
-        if (!isVisible(name)) {
-            error(ctx, "variable '" + name + "' is not declared");
-            return null;
-        }
-        String target = typeOf(name);
+    /** `x op= value` is checked exactly like `x = x op value`. */
+    private String checkUpdate(ParserRuleContext ctx, VoxParser.TargetContext target,
+                               String op, String valueType) {
+        String targetType = typeOfTarget(target);
+        if (targetType == null) return null;
+        String name = target.getText();
         String result;
         if (op.equals("++") || op.equals("--") || op.equals("double") || op.equals("halve")) {
-            if (!isNumeric(target)) {
-                error(ctx, "operator '" + op + "' cannot be applied to " + target);
+            if (!isNumeric(targetType)) {
+                error(ctx, "operator '" + op + "' cannot be applied to " + targetType);
                 return null;
             }
-            result = target;
-        } else if (op.equals("+=") && ("string".equals(target) || "string".equals(valueType))) {
+            result = targetType;
+        } else if (op.equals("+=") && isList(targetType)) {
+            error(ctx, "to add an item to a list, use 'push ... to " + name + "'");
+            return null;
+        } else if (op.equals("+=") && ("string".equals(targetType) || "string".equals(valueType))) {
             result = "string"; // '+' doubles as string concatenation
         } else {
-            result = arithmetic(ctx, target, valueType, op);
+            result = arithmetic(ctx, targetType, valueType, op);
         }
-        checkAssignable(ctx, target, result, name);
+        checkAssignable(ctx, targetType, result, name);
         return null;
+    }
+
+    // -------------------------------------------------------------- lists --
+
+    @Override
+    public String visitPushTo(VoxParser.PushToContext ctx) {
+        String valueType = visit(ctx.expression(0));
+        String listType = visit(ctx.expression(1));
+        if (ctx.AT() != null) requireIndex(ctx.expression(2), visit(ctx.expression(2)));
+        checkListOp(ctx, "push", listType, valueType);
+        return null;
+    }
+
+    @Override
+    public String visitInsertInto(VoxParser.InsertIntoContext ctx) {
+        String valueType = visit(ctx.expression(0));
+        String listType = visit(ctx.expression(1));
+        requireIndex(ctx.expression(2), visit(ctx.expression(2)));
+        checkListOp(ctx, "insert", listType, valueType);
+        return null;
+    }
+
+    /** push(xs, v) and insert(xs, i, v): the call spellings of the statements above. */
+    @Override
+    public String visitPushCall(VoxParser.PushCallContext ctx) {
+        String listType = visit(ctx.expression(0));
+        String valueType = visit(ctx.expression(1));
+        checkListOp(ctx, "push", listType, valueType);
+        return null;
+    }
+
+    @Override
+    public String visitInsertCall(VoxParser.InsertCallContext ctx) {
+        String listType = visit(ctx.expression(0));
+        requireIndex(ctx.expression(1), visit(ctx.expression(1)));
+        String valueType = visit(ctx.expression(2));
+        checkListOp(ctx, "insert", listType, valueType);
+        return null;
+    }
+
+    /** The list operand must be a list, and the value must fit its items. */
+    private void checkListOp(ParserRuleContext ctx, String op, String listType, String valueType) {
+        if (listType == null || "error".equals(listType) || "any".equals(listType)) return;
+        if (!isList(listType)) {
+            error(ctx, "'" + op + "' needs a list but got " + listType);
+            return;
+        }
+        if (valueType != null && !"ok".equals(fits(elementOf(listType), valueType))) {
+            error(ctx, "cannot " + op + " " + valueType + " into " + listType);
+        }
+    }
+
+    @Override
+    public String visitPopExpr(VoxParser.PopExprContext ctx) {
+        String listType = visit(ctx.expression(0));
+        if (ctx.AT() != null) requireIndex(ctx.expression(1), visit(ctx.expression(1)));
+        return popResult(ctx, listType);
+    }
+
+    /** pop(xs) and pop(xs, i): the call spelling. */
+    @Override
+    public String visitPopCall(VoxParser.PopCallContext ctx) {
+        String listType = visit(ctx.expression(0));
+        if (ctx.expression().size() > 1) {
+            requireIndex(ctx.expression(1), visit(ctx.expression(1)));
+        }
+        return popResult(ctx, listType);
+    }
+
+    private String popResult(ParserRuleContext ctx, String listType) {
+        if (listType == null || "error".equals(listType)) return "error";
+        if ("any".equals(listType)) return "any";
+        if (!isList(listType)) {
+            error(ctx, "'pop' needs a list but got " + listType);
+            return "error";
+        }
+        return elementOf(listType);
+    }
+
+    @Override
+    public String visitIndexExpr(VoxParser.IndexExprContext ctx) {
+        String base = visit(ctx.expression(0));
+        requireIndex(ctx.expression(1), visit(ctx.expression(1)));
+        String t = itemTypeOf(ctx, base);
+        return t == null ? "error" : t;
+    }
+
+    @Override
+    public String visitOrdinalExpr(VoxParser.OrdinalExprContext ctx) {
+        checkOrdinal(ctx, ctx.ORDINAL());
+        String t = itemTypeOf(ctx, visit(ctx.expression()));
+        return t == null ? "error" : t;
+    }
+
+    /** `[1, 2, 3]` is a list of integer; `[]` is a list of any until it is given a type. */
+    @Override
+    public String visitListExpr(VoxParser.ListExprContext ctx) {
+        String element = null;
+        for (VoxParser.ExpressionContext e : ctx.expression()) {
+            String t = visit(e);
+            if (t == null || "error".equals(t)) return "error";
+            if ("any".equals(t)) continue;
+            if (element == null || t.equals(element)) {
+                element = t;
+            } else if ("ok".equals(fits(element, t)) && "ok".equals(fits(t, element))) {
+                // `[[], [1]]`: an empty inner list takes the type of a full one.
+                if (element.contains("any")) element = t;
+            } else {
+                error(e, "list items must all have the same type; got " + element + " and " + t);
+                return "error";
+            }
+        }
+        return listOf(element == null ? "any" : element);
+    }
+
+    @Override
+    public String visitInExpr(VoxParser.InExprContext ctx) {
+        String valueType = visit(ctx.expression(0));
+        String listType = visit(ctx.expression(1));
+        checkContains(ctx, ctx.op.getType() == VoxParser.NE ? "is not in" : "is in", listType, valueType);
+        return "boolean";
+    }
+
+    @Override
+    public String visitContainsExpr(VoxParser.ContainsExprContext ctx) {
+        String listType = visit(ctx.expression(0));
+        String valueType = visit(ctx.expression(1));
+        checkContains(ctx, "contains", listType, valueType);
+        return "boolean";
+    }
+
+    private void checkContains(ParserRuleContext ctx, String op, String listType, String valueType) {
+        if (listType == null || "error".equals(listType) || "any".equals(listType)) return;
+        if (!isList(listType)) {
+            error(ctx, "operator '" + op + "' needs a list but got " + listType);
+            return;
+        }
+        if (valueType != null && !"error".equals(valueType) && !"any".equals(valueType)
+                && "no".equals(fits(elementOf(listType), valueType))) {
+            error(ctx, "operator '" + op + "' cannot look for " + valueType + " in " + listType);
+        }
     }
 
     // ------------------------------------------------------------ control --
@@ -449,9 +668,8 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
     public String visitRangeLoop(VoxParser.RangeLoopContext ctx) {
         VoxParser.RangeClauseContext rc = ctx.rangeClause();
         String name = rc.ID().getText();
-        String varType = rc.datatype() != null ? canonical(rc.datatype().getText()) : "integer";
-        // The bounds are evaluated before the loop variable exists, so
-        // `for i from i to 10` refers to an outer i.
+        String varType = rc.datatype() != null ? typeName(rc.datatype()) : "integer";
+        // The bounds are evaluated before the loop variable exists.
         String startType = visit(rc.start);
         String limitType = visit(rc.limit);
         String stepType = rc.step != null ? visit(rc.step) : null;
@@ -471,7 +689,7 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
 
         // The loop variable belongs to a scope enclosing the body.
         enterScope();
-        define(name, varType);
+        declareVariable(rc, name, varType, null);
         if (isNumeric(varType)) {
             checkAssignable(rc, varType, startType, name);
             if (rc.step != null) checkAssignable(rc.step, varType, stepType, name);
@@ -483,9 +701,51 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         return null;
     }
 
+    /** `for each x in xs`: x is a fresh variable holding a copy of each item. */
+    @Override
+    public String visitForEachLoop(VoxParser.ForEachLoopContext ctx) {
+        String listType = visit(ctx.expression());
+        String element = "any";
+        if (listType != null && !"error".equals(listType) && !"any".equals(listType)) {
+            if (isList(listType)) {
+                element = elementOf(listType);
+            } else {
+                error(ctx.expression(), "for each needs a list but got " + listType);
+            }
+        }
+
+        String name = ctx.ID().getText();
+        VoxParser.DatatypeContext declared = ctx.datatype();
+        String varType = declared != null ? typeName(declared) : element;
+        if (declared != null && !"any".equals(element) && !"ok".equals(fits(varType, element))) {
+            error(declared, "loop variable '" + name + "' is " + varType + " but the list holds " + element);
+        }
+
+        enterScope();
+        declareVariable(ctx, name, varType, null);
+        loopDepth++;
+        visit(ctx.block());
+        loopDepth--;
+        exitScope();
+        return null;
+    }
+
     private void requireNumber(ParserRuleContext ctx, String t, String what) {
         if (t == null || "error".equals(t) || "any".equals(t) || isNumeric(t)) return;
         error(ctx, what + " must be a number but got " + t);
+    }
+
+    /** The value of a numeric literal (possibly negated or parenthesised), else null. */
+    private static Double literalValue(VoxParser.ExpressionContext e) {
+        while (e instanceof VoxParser.ParenExprContext) e = ((VoxParser.ParenExprContext) e).expression();
+        if (e instanceof VoxParser.IntExprContext || e instanceof VoxParser.FloatExprContext) {
+            return Double.parseDouble(e.getText());
+        }
+        if (e instanceof VoxParser.NegExprContext) {
+            Double inner = literalValue(((VoxParser.NegExprContext) e).expression());
+            return inner == null ? null : -inner;
+        }
+        return null;
     }
 
     @Override
@@ -507,19 +767,6 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         visit(ctx.block());
         loopDepth--;
         requireCondition(ctx.expression());
-        return null;
-    }
-
-    /** The value of a numeric literal (possibly negated or parenthesised), else null. */
-    private static Double literalValue(VoxParser.ExpressionContext e) {
-        while (e instanceof VoxParser.ParenExprContext) e = ((VoxParser.ParenExprContext) e).expression();
-        if (e instanceof VoxParser.IntExprContext || e instanceof VoxParser.FloatExprContext) {
-            return Double.parseDouble(e.getText());
-        }
-        if (e instanceof VoxParser.NegExprContext) {
-            Double inner = literalValue(((VoxParser.NegExprContext) e).expression());
-            return inner == null ? null : -inner;
-        }
         return null;
     }
 
@@ -547,7 +794,8 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         // because in a spoken language it reads like an assignment.
         if (e instanceof VoxParser.EqExprContext) {
             warn(e, "comparison has no effect; to assign, use 'set ... to', '<-' or '='");
-        } else if (!(e instanceof VoxParser.CallExprContext) && !(e instanceof VoxParser.InputExprContext)) {
+        } else if (!(e instanceof VoxParser.CallExprContext) && !(e instanceof VoxParser.InputExprContext)
+                && !(e instanceof VoxParser.PopExprContext) && !(e instanceof VoxParser.PopCallContext)) {
             warn(e, "expression has no effect");
         }
         return null;
@@ -555,8 +803,8 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
 
     private void requireCondition(VoxParser.ExpressionContext ctx) {
         String t = visit(ctx);
-        if ("string".equals(t)) {
-            warn(ctx, "condition has type string; it is true when non-empty");
+        if ("string".equals(t) || (t != null && isList(t))) {
+            warn(ctx, "condition has type " + t + "; it is true when non-empty");
         }
     }
 
@@ -570,8 +818,17 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
     @Override
     public String visitCastExpr(VoxParser.CastExprContext ctx) {
         String source = visit(ctx.expression());
-        String target = canonical(ctx.datatype().getText());
-        return "error".equals(source) ? "error" : target;
+        String target = typeName(ctx.datatype());
+        if ("error".equals(source)) return "error";
+        if (isList(target)) {
+            error(ctx, "cannot convert to " + target);
+            return "error";
+        }
+        if (source != null && isList(source) && !"string".equals(target)) {
+            error(ctx, "cannot convert " + source + " to " + target);
+            return "error";
+        }
+        return target;
     }
 
     @Override
@@ -633,6 +890,16 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
                 "subtracted from");
     }
 
+    private String arithmetic(ParserRuleContext ctx, String l, String r, String op) {
+        if ("error".equals(l) || "error".equals(r)) return "error";
+        if ("any".equals(l) || "any".equals(r)) return "any";
+        if (l != null && r != null && isNumeric(l) && isNumeric(r)) {
+            return ("float".equals(l) || "float".equals(r)) ? "float" : "integer";
+        }
+        error(ctx, "operator '" + op + "' cannot be applied to " + l + " and " + r);
+        return "error";
+    }
+
     // ---- predicates: `is even`, `is not positive`, `is divisible by`, ... ----
 
     /** "is even" or "is not even", regardless of how the operator was spelled. */
@@ -647,7 +914,7 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
             int pred = ctx.pred.getType();
             boolean ok;
             if (pred == VoxParser.EMPTY) {
-                ok = "string".equals(t) || "character".equals(t);
+                ok = "string".equals(t) || "character".equals(t) || isList(t);
             } else if (pred == VoxParser.EVEN || pred == VoxParser.ODD) {
                 ok = "integer".equals(t);
             } else {
@@ -685,16 +952,6 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         return "boolean";
     }
 
-    private String arithmetic(ParserRuleContext ctx, String l, String r, String op) {
-        if ("error".equals(l) || "error".equals(r)) return "error";
-        if ("any".equals(l) || "any".equals(r)) return "any";
-        if (l != null && r != null && isNumeric(l) && isNumeric(r)) {
-            return ("float".equals(l) || "float".equals(r)) ? "float" : "integer";
-        }
-        error(ctx, "operator '" + op + "' cannot be applied to " + l + " and " + r);
-        return "error";
-    }
-
     @Override
     public String visitRelExpr(VoxParser.RelExprContext ctx) {
         return comparison(ctx, visit(ctx.expression(0)), visit(ctx.expression(1)),
@@ -713,7 +970,7 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         if ("any".equals(l) || "any".equals(r)) return "boolean";
         boolean ok = l != null && r != null
                 && ((isNumeric(l) && isNumeric(r))
-                    || (l.equals(r) && (!ordered || !"boolean".equals(l))));
+                    || (l.equals(r) && (!ordered || (!"boolean".equals(l) && !isList(l)))));
         if (!ok) {
             error(ctx, "operator '" + op + "' cannot compare " + l + " and " + r);
             return "error";
@@ -750,7 +1007,7 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
     @Override public String visitStringExpr(VoxParser.StringExprContext ctx) { return "string"; }
     @Override public String visitBoolExpr(VoxParser.BoolExprContext ctx)     { return "boolean"; }
     // input() is dynamically typed: the runtime coerces "12" to an integer,
-    // "true" to a boolean and anything else to a string. Reporting it as a
+    // "true" to a boolean, and anything else to a string. Reporting it as a
     // fixed type would make every realistic use of it a type error.
     @Override public String visitInputExpr(VoxParser.InputExprContext ctx)   { return "any"; }
 
@@ -794,16 +1051,17 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         for (int i = 0; i < argTypes.size(); i++) {
             String want = sig.paramTypes.get(i);
             String got = argTypes.get(i);
-            if (got == null || "error".equals(got) || "any".equals(got) || want.equals(got)) continue;
-            if (isNumeric(want) && isNumeric(got)) {
-                if (want.equals("integer") && got.equals("float")) {
+            if (got == null) continue;
+            switch (fits(want, got)) {
+                case "ok": break;
+                case "narrow":
                     warn(ctx, "argument " + (i + 1) + " of '" + name
                             + "': implicit cast float -> integer loses precision");
-                }
-                continue;
+                    break;
+                default:
+                    error(ctx, "argument " + (i + 1) + " of '" + name + "' expects "
+                            + want + " but got " + got);
             }
-            error(ctx, "argument " + (i + 1) + " of '" + name + "' expects "
-                    + want + " but got " + got);
         }
         return sig.returnType;
     }
@@ -812,7 +1070,10 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
     private String checkBuiltin(ParserRuleContext ctx, String name, List<String> argTypes) {
         BuiltinSpec spec = BUILTINS.get(name);
         String result = spec.result;
-        if ("numeric".equals(result)) {
+        if ("same".equals(result)) {
+            String t = argTypes.isEmpty() ? null : argTypes.get(0);
+            result = (t == null || "error".equals(t)) ? "any" : t;
+        } else if ("numeric".equals(result)) {
             result = "integer";
             if (argTypes.contains("float")) result = "float";
             else if (argTypes.contains("any")) result = "any";
@@ -826,11 +1087,17 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
             String got = argTypes.get(i);
             if (got == null || "error".equals(got) || "any".equals(got)) continue;
             String kind = spec.params[i];
-            boolean ok = "num".equals(kind) ? isNumeric(got)
-                    : ("string".equals(got) || "character".equals(got));
+            boolean ok;
+            String want;
+            switch (kind) {
+                case "num":    ok = isNumeric(got); want = "a number"; break;
+                case "string": ok = "string".equals(got) || "character".equals(got); want = "string"; break;
+                case "list":   ok = isList(got); want = "a list"; break;
+                default:       ok = "string".equals(got) || "character".equals(got) || isList(got);
+                               want = "a string or a list"; break;
+            }
             if (!ok) {
-                error(ctx, "argument " + (i + 1) + " of '" + name + "' expects "
-                        + ("num".equals(kind) ? "a number" : "string") + " but got " + got);
+                error(ctx, "argument " + (i + 1) + " of '" + name + "' expects " + want + " but got " + got);
             }
         }
         return result;
@@ -857,32 +1124,88 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
             error(ctx, "function '" + currentName + "' must return a value of type " + currentReturnType);
             return null;
         }
-        if (valueType == null || "error".equals(valueType) || "any".equals(valueType)
-                || valueType.equals(currentReturnType)) return null;
-        if (isNumeric(currentReturnType) && isNumeric(valueType)) {
-            if ("integer".equals(currentReturnType) && "float".equals(valueType)) {
+        if (valueType == null) return null;
+        switch (fits(currentReturnType, valueType)) {
+            case "ok": return null;
+            case "narrow":
                 warn(ctx, "implicit cast float -> integer in return from '" + currentName + "' loses precision");
-            }
-            return null;
+                return null;
+            default:
+                error(ctx, "cannot return " + valueType + " from function '" + currentName
+                        + "' which returns " + currentReturnType);
+                return null;
         }
-        error(ctx, "cannot return " + valueType + " from function '" + currentName
-                + "' which returns " + currentReturnType);
-        return null;
     }
 
-    /** Maps every spelling of a type onto one canonical name. */
+    // ---------------------------------------------------------------- types --
+
+    static boolean isList(String t) {
+        return t.startsWith("list of ");
+    }
+
+    static String listOf(String element) {
+        return "list of " + element;
+    }
+
+    static String elementOf(String listType) {
+        return listType.substring("list of ".length());
+    }
+
+    /**
+     * Whether a value of type `value` may be stored where `target` is
+     * expected: "ok", "narrow" (float into integer - legal with a warning) or
+     * "no". Lists must match item for item; only "any" (an empty literal, or
+     * input) is a wildcard.
+     */
+    static String fits(String target, String value) {
+        if ("error".equals(value)) return "ok"; // already reported elsewhere
+        if (target.equals(value)) return "ok";
+        if ("any".equals(target) || "any".equals(value)) return "ok";
+        if (isList(target) && isList(value)) {
+            return "ok".equals(fits(elementOf(target), elementOf(value))) ? "ok" : "no";
+        }
+        if (isNumeric(target) && isNumeric(value)) {
+            return "integer".equals(target) && "float".equals(value) ? "narrow" : "ok";
+        }
+        return "no";
+    }
+
+    /** The English suffix for an ordinal: 1st, 2nd, 3rd, 4th, 11th, 21st... */
+    static String ordinalSuffix(int n) {
+        int tens = n % 100;
+        if (tens >= 11 && tens <= 13) return "th";
+        switch (n % 10) {
+            case 1:  return "st";
+            case 2:  return "nd";
+            case 3:  return "rd";
+            default: return "th";
+        }
+    }
+
+    /** The type a `datatype` node spells: a scalar, or `list of <type>`. */
+    static String typeName(VoxParser.DatatypeContext ctx) {
+        if (ctx instanceof VoxParser.ListTypeContext) {
+            return listOf(typeName(((VoxParser.ListTypeContext) ctx).datatype()));
+        }
+        return canonical(ctx.getText());
+    }
+
+    /** Maps every spelling of a scalar type onto one canonical name. */
     static String canonical(String written) {
         String t = written.trim().replaceAll("\\s+", " ");
         switch (t) {
-            case "int": case "integer": case "number": case "whole number":
+            case "int": case "integer": case "integers": case "number": case "numbers":
+            case "whole number": case "whole numbers":
                 return "integer";
-            case "float": case "floating point number":
+            case "float": case "floats": case "floating point number": case "floating point numbers":
                 return "float";
-            case "bool": case "boolean": case "boolean number":
+            case "bool": case "bools": case "boolean": case "booleans":
+            case "boolean number": case "boolean numbers":
                 return "boolean";
-            case "char": case "character":
+            case "char": case "chars": case "character": case "characters":
                 return "character";
-            case "string": case "character string": case "varchar":
+            case "string": case "strings": case "character string": case "character strings":
+            case "varchar":
                 return "string";
             default:
                 return t;

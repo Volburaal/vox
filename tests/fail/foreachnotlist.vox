@@ -1,0 +1,6 @@
+main {
+    integer n <- 3;
+    for each x in n {
+        say x;
+    }
+}

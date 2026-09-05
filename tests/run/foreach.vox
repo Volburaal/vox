@@ -1,0 +1,56 @@
+integer total(integer[] xs) {
+    integer sum <- 0;
+    for each x in xs {
+        sum += x;
+    }
+    return sum;
+}
+
+procedure bump(integer[] xs) {
+    for i from 0 until length of xs {
+        xs[i]++;                      // lists are references: the caller's list changes
+    }
+}
+
+main {
+    integer[] nums <- [1, 2, 3];
+    say total(nums);
+
+    for every n in nums {
+        print(n, " ");
+    }
+    print('\n');
+
+    for (integer n : nums) {
+        print(n * 10, " ");
+    }
+    print('\n');
+
+    bump(nums);
+    say nums;
+
+    integer[] alias <- nums;
+    push 5 to alias;
+    say nums;
+
+    integer[] dup <- copy of nums;
+    push 6 to dup;
+    say nums, " ", dup;
+
+    // Pushing while iterating extends the loop; stop ends it.
+    integer[] queue <- [1];
+    integer seen <- 0;
+    for each q in queue {
+        seen++;
+        if (q < 4) { push q + 1 to queue; }
+        if (seen > 10) { stop; }
+    }
+    say seen, " ", queue;
+
+    string[] words <- ["on", "the", "air"];
+    for each string w in words {
+        if (w is "the") { skip; }
+        print(uppercase of w, ".");
+    }
+    print('\n');
+}

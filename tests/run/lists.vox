@@ -1,0 +1,57 @@
+main {
+    // Declarations, every spelling.
+    list<integer> a;
+    integer[] b;
+    integer c[];
+    d is a list of integers;
+    integer e[3];
+    let f be [10, 20, 30];
+    string[] names <- ["ann", "bob"];
+    consider a list of floats ratios which is equal to [0.5, 1.5];
+
+    say a, " ", b, " ", c, " ", d;
+    say e;
+    say f, " ", names, " ", ratios;
+
+    // Reading: subscripts are 0-based, ordinals count from one.
+    say f[0], " ", f[2];
+    say 1st item of f, " ", 3rd value of f;
+    say 2nd item of names;
+
+    // Writing, and updating items in place.
+    f[1] <- 21;
+    set the 3rd item of f to 33;
+    f[0]++;
+    add 5 to f[0];
+    double the 2nd item of f;
+    say f;
+
+    // Growing and shrinking.
+    push 40 to f;
+    push 5 to f at 0;
+    insert 7 into f at 2;
+    say f;
+    say pop f;
+    say pop f at 0;
+    say f;
+    push(f, 99);
+    insert(f, 1, 8);
+    say pop(f), " ", pop(f, 1), " ", f;
+
+    // Length, emptiness, membership.
+    say length of f, " ", length(f);
+    say f is empty, " ", a is empty;
+    say f contains 42, " ", 5 is in f, " ", 5 is not in f;
+
+    // Nested lists.
+    integer[][] grid <- [[1, 2], [3, 4]];
+    say grid[1][0], " ", 2nd item of 1st item of grid;
+    grid[0][1] <- 9;
+    push [5, 6] to grid;
+    say grid;
+    integer[] rows[2];
+    say rows;
+
+    // Equality is by items.
+    say [1, 2] is [1, 2], " ", [1, 2] is [2, 1];
+}

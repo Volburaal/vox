@@ -54,9 +54,9 @@ main {
             print(i, "-", j, '\n');
         }
     }
-    // Bounds see the outer variable, even when the loop reuses its name.
+    // Bounds are read before the loop variable exists.
     integer i <- 7;
-    for i from 1 to i + 2 {
-        print(i, '\n');
+    for k from 1 to i + 2 {
+        print(k, '\n');
     }
 }

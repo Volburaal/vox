@@ -1,0 +1,4 @@
+main {
+    integer[] xs <- [1, 2];
+    say 2th item of xs;
+}

@@ -19,6 +19,7 @@
 - In-place updates in both spellings: `n++` / `increment n`, `n += 3` / `add 3 to n`, `double n`
 - The voice forms: `say`, `ask`, `set ... to`, `let ... be`, `swap ... and ...`
 - `print` writes raw text - `'\n'` ends a line; `say` always ends the line
+- Lists: `integer[] xs`, `list<integer>` or `xs is a list of integers`; `xs[i]` and `2nd item of xs`; `push`, `pop`, `insert`; `for each x in xs`
 - Functions, procedures, forward declarations and recursion
 - `main { }` may also be spelled `program { }` or `code { }`
 - Input/Output operations
@@ -240,20 +241,21 @@ main {
 | Level | Operators                                                                                                              |
 | ----- | ---------------------------------------------------------------------------------------------------------------------- |
 | 1     | `( )`                                                                                                                  |
-| 2     | `as` (cast)                                                                                                            |
-| 3     | `squared`, `cubed`                                                                                                     |
-| 4     | spoken builtins: `square root of`, `length of`, ...                                                                    |
-| 5     | `^` `**` / `to the power of` / `raised to the power of` (right associative)                                            |
-| 6     | unary `-`                                                                                                              |
-| 7     | `not` / `!` / `~`                                                                                                      |
-| 8     | `*` `/` `%` / `multiplied by` / `times` / `divided by` / `remainder from`                                              |
-| 9     | `+` `-` / `added to` / `plus` / `minus`                                                                                |
-| 10    | `subtracted from`                                                                                                      |
-| 11    | predicates: `is even`, `is odd`, `is positive`, `is negative`, `is empty`, `is divisible by`, `is between ... and ...` |
-| 12    | `<` `>` `<=` `>=` / `is less than` / `is greater than` / ...                                                           |
-| 13    | `==` `!=` / `is` / `is equal to` / `equals` / `equals to` / `is not`                                                   |
-| 14    | `&&` `&` / `and`                                                                                                       |
-| 15    | `\|\|` `\|` / `or`                                                                                                     |
+| 2     | `xs[i]` (an item of a list)                                                                                            |
+| 3     | `as` (cast)                                                                                                            |
+| 4     | `squared`, `cubed`                                                                                                     |
+| 5     | spoken builtins (`square root of`, `length of`, ...), `Nth item of`, `pop`, `ask`                                      |
+| 6     | `^` `**` / `to the power of` / `raised to the power of` (right associative)                                            |
+| 7     | unary `-`                                                                                                              |
+| 8     | `not` / `!` / `~`                                                                                                      |
+| 9     | `*` `/` `%` / `multiplied by` / `times` / `divided by` / `remainder from`                                              |
+| 10    | `+` `-` / `added to` / `plus` / `minus`                                                                                |
+| 11    | `subtracted from`                                                                                                      |
+| 12    | predicates: `is even`, `is odd`, `is positive`, `is negative`, `is empty`, `is divisible by`, `is between ... and ...`, `is in`, `contains` |
+| 13    | `<` `>` `<=` `>=` / `is less than` / `is greater than` / ...                                                           |
+| 14    | `==` `!=` / `is` / `is equal to` / `equals` / `equals to` / `is not`                                                   |
+| 15    | `&&` `&` / `and`                                                                                                       |
+| 16    | `\|\|` `\|` / `or`                                                                                                     |
 
 `a subtracted from b` evaluates to `b - a`. Prefix and postfix forms apply to
 the term next to them: `-x squared` is `-(x squared)`, `2 * x squared` is
@@ -287,6 +289,11 @@ let there be a whole number w which equals 9;
 
 Defaults are `0` for `integer`, `0.0` for `float`, `false` for `boolean` and
 the empty string for `string` and `character`.
+
+A name cannot be declared again while one is visible - in the same block or an
+enclosing one - so no variable is ever shadowed, and a local cannot reuse a
+parameter's name. Sibling blocks may reuse a name, since neither can see the
+other's.
 
 ### input()
 
@@ -421,9 +428,10 @@ when `s` is a string, `halve n` on an integer is integer division and
 `increment name` on a string is a compile error. The classic `for` loop takes
 an update as its third clause: `for (integer i <- 1; i <= 5; i++)`.
 
-The verbs, the range-loop words and the voice words (`add`, `double`, `to`,
-`from`, `by`, `the`, `step`, `until`, `say`, `ask`, `set`, `let`, `be`,
-`swap`, `repeat`, `even`, `odd`, ...) are keywords, so they cannot name a
+The verbs, the range-loop words, the voice words and the list words (`add`,
+`double`, `to`, `from`, `by`, `the`, `step`, `until`, `say`, `ask`, `set`,
+`let`, `be`, `swap`, `repeat`, `even`, `odd`, `list`, `in`, `at`, `push`,
+`pop`, `insert`, `into`, `contains`, ...) are keywords, so they cannot name a
 variable or a function.
 
 ### Range loops
@@ -442,6 +450,35 @@ start, end and step are evaluated once, before the first iteration, so
 reassigning the bound inside the body does not change how many times it runs.
 The step must be positive; to count down, say `down to`. Parentheses around the
 clause are optional.
+
+### Lists
+
+```java
+list<integer> a;                       // empty; also: integer[] a; integer a[];
+b is a list of integers;               // spoken
+integer zeros[3];                      // [0, 0, 0]
+let primes be [2, 3, 5];               // inferred: list of integer
+integer[][] grid <- [[1, 2], [3, 4]];  // lists nest
+
+say primes[0], " ", 1st item of primes;   // 2 2 - subscripts count from 0, ordinals from 1
+set the 2nd item of primes to 33;
+primes[0]++;
+
+push 7 to primes;                      // append; also push(primes, 7)
+push 1 to primes at 0;                 // before item 0; also insert 1 into primes at 0
+let last be pop primes;                // remove and return the last item; `pop primes at i` picks one
+say length of primes, " ", primes contains 33, " ", primes is empty;
+
+for each p in primes { say p; }        // also: for every p in primes; for (integer p : primes)
+```
+
+Lists are references: `ys <- xs` makes two names for one list, and a function
+that receives a list works on the caller's list. `copy of xs` makes a separate
+one. `is` compares lists item by item. Indexes run from `0` to `length - 1`;
+anything else - including a negative index - is a runtime error, as is popping
+an empty list. Ordinals are checked: `2th item` is a compile error that tells
+you to write `2nd`. Inside `for each` the length is re-read every turn, so
+pushing to the list extends the loop.
 
 ### Powers
 
