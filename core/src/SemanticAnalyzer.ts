@@ -4,7 +4,8 @@ import {
     ProgramContext, PrototypeContext, DefinitionContext, MainFunctionContext,
     BlockContext, ParameterListContext, ReturnTypeContext, DatatypeContext,
     ListTypeContext, DeclForwardContext, DeclReverseContext, DeclLetContext,
-    DeclSizedContext, DeclListIsContext, AssignForwardContext,
+    DeclSizedContext, DeclListIsContext, DeclConstantContext,
+    DeclConstantLetContext, AssignForwardContext,
     AssignReverseContext, SetToContext, SwapStmtContext, TargetContext,
     NameTargetContext, IndexTargetContext, OrdinalTargetContext,
     IfStatementContext, WhileLoopContext, ForLoopContext, RangeLoopContext,
@@ -13,7 +14,8 @@ import {
     DecStmtContext, OpAssignContext, IncreaseByContext, DecreaseByContext,
     AddToContext, TakeFromContext, MultiplyByContext, DivideByContext,
     DoubleStmtContext, HalveStmtContext, PushToContext, InsertIntoContext,
-    PushCallContext, InsertCallContext, PopCallContext,
+    PushCallContext, InsertCallContext, PopCallContext, ListStatementContext,
+    MethodCallContext, PositionExprContext,
     ExpressionContext, ParenExprContext, IndexExprContext, CastExprContext,
     BuiltinExprContext, BuiltinNameContext, OrdinalExprContext, PopExprContext,
     AskExprContext, NegExprContext, SquaredExprContext, NotExprContext,
@@ -34,10 +36,22 @@ interface Signature {
     paramTypes: string[];
 }
 
-/** What a builtin accepts per parameter, and what it returns. */
+/** A variable in scope: its type, and whether assignment to it is forbidden. */
+interface Binding {
+    type: string;
+    constant: boolean;
+}
+
+/**
+ * What a builtin accepts per parameter, and what it returns.
+ *   params: 'num' | 'string' | 'sized' (string or list) | 'list'
+ *         | 'sortable' (a list of scalars) | 'numlist' (a list of numbers)
+ *         | 'item' (something that fits the first argument's item type)
+ *   result: a fixed type, 'numeric' (float if any float), 'same' (the first
+ *           argument's type), 'element' (its item type) or 'void'
+ */
 interface BuiltinSpec {
-    params: ('num' | 'string' | 'sized' | 'list')[];
-    /** A fixed type, 'numeric' (float if any float) or 'same' (the argument's type). */
+    params: ('num' | 'string' | 'sized' | 'list' | 'sortable' | 'numlist' | 'item')[];
     result: string;
 }
 
@@ -58,6 +72,20 @@ export const BUILTINS: ReadonlyMap<string, BuiltinSpec> = new Map<string, Builti
     ['uppercase', { params: ['string'],     result: 'string' }],
     ['lowercase', { params: ['string'],     result: 'string' }],
     ['copy',      { params: ['list'],       result: 'same' }],
+    // list switches and their questions
+    ['lock',      { params: ['list'],       result: 'void' }],
+    ['unlock',    { params: ['list'],       result: 'void' }],
+    ['wrap',      { params: ['list'],       result: 'void' }],
+    ['unwrap',    { params: ['list'],       result: 'void' }],
+    ['locked',    { params: ['list'],       result: 'boolean' }],
+    ['wrapping',  { params: ['list'],       result: 'boolean' }],
+    // ordering and aggregates
+    ['sort',      { params: ['sortable'],   result: 'void' }],
+    ['reverse',   { params: ['list'],       result: 'void' }],
+    ['sum',       { params: ['numlist'],    result: 'element' }],
+    ['largest',   { params: ['sortable'],   result: 'element' }],
+    ['smallest',  { params: ['sortable'],   result: 'element' }],
+    ['position',  { params: ['list', 'item'], result: 'integer' }],
 ]);
 
 /** Maps a spoken builtin token onto its symbolic name. */
@@ -69,6 +97,9 @@ export function builtinNameOf(ctx: BuiltinNameContext): string {
     if (ctx.CEIL_OF()) return 'ceiling';
     if (ctx.UPPER_OF()) return 'uppercase';
     if (ctx.COPY_OF()) return 'copy';
+    if (ctx.SUM_OF()) return 'sum';
+    if (ctx.LARGEST_OF()) return 'largest';
+    if (ctx.SMALLEST_OF()) return 'smallest';
     return 'lowercase';
 }
 
@@ -83,7 +114,7 @@ export function builtinNameOf(ctx: BuiltinNameContext): string {
 export class SemanticAnalyzer extends VoxVisitor<string | null> {
     private readonly functions = new Map<string, Signature>();
     /** Innermost scope is the LAST element. */
-    private readonly scopes: Map<string, string>[] = [];
+    private readonly scopes: Map<string, Binding>[] = [];
     /** The function being checked; null inside main. */
     private currentFunction: { name: string; returnType: string } | null = null;
     private loopDepth = 0;
@@ -121,30 +152,34 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         return this.scopes.some(s => s.has(name));
     }
 
-    private typeOf(name: string): string | null {
+    private binding(name: string): Binding | null {
         for (let i = this.scopes.length - 1; i >= 0; i--) {
-            const t = this.scopes[i].get(name);
-            if (t !== undefined) return t;
+            const b = this.scopes[i].get(name);
+            if (b !== undefined) return b;
         }
         return null;
     }
 
-    private define(name: string, type: string): void {
-        if (this.scopes.length > 0) this.scopes[this.scopes.length - 1].set(name, type);
+    private typeOf(name: string): string | null {
+        return this.binding(name)?.type ?? null;
+    }
+
+    private define(name: string, type: string, constant = false): void {
+        if (this.scopes.length > 0) this.scopes[this.scopes.length - 1].set(name, { type, constant });
     }
 
     /**
      * Declares a variable. A name cannot be reused while one is visible - in
      * this scope or any enclosing one - so no variable is ever shadowed.
      */
-    private declareVariable(ctx: ParserRuleContext, name: string,
-                            type: string, valueType: string | null): void {
+    private declareVariable(ctx: ParserRuleContext, name: string, type: string,
+                            valueType: string | null, constant = false): void {
         if (this.declaredHere(name)) {
             this.error(ctx, `variable '${name}' is already declared in this scope`);
         } else if (this.isVisible(name)) {
             this.error(ctx, `variable '${name}' is already declared in an enclosing scope`);
         } else {
-            this.define(name, type);
+            this.define(name, type, constant);
         }
         if (valueType !== null) this.checkAssignable(ctx, type, valueType, name);
     }
@@ -230,8 +265,12 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     // -------------------------------------------------------- declarations --
 
     visitDeclForward = (ctx: DeclForwardContext): null => {
+        const type = typeName(ctx.datatype());
+        if (ctx.FIXED() && !isList(type)) {
+            this.error(ctx, `'fixed' applies to lists, not ${type}`);
+        }
         const valueType = ctx.expression() ? this.visit(ctx.expression()) : null;
-        this.declareVariable(ctx, ctx.ID().getText(), typeName(ctx.datatype()), valueType);
+        this.declareVariable(ctx, ctx.ID().getText(), type, valueType);
         return null;
     };
 
@@ -277,6 +316,24 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         return null;
     };
 
+    /** `constant integer MAX <- 10`: assigning to MAX later is a compile error. */
+    visitDeclConstant = (ctx: DeclConstantContext): null => {
+        const valueType = this.visit(ctx.expression());
+        this.declareVariable(ctx, ctx.ID().getText(), typeName(ctx.datatype()), valueType, true);
+        return null;
+    };
+
+    /** `let TAX always be 0.2`: a constant with an inferred type. */
+    visitDeclConstantLet = (ctx: DeclConstantLetContext): null => {
+        let valueType = this.visit(ctx.expression());
+        if (valueType === listOf('any')) {
+            this.error(ctx, 'the type of [] cannot be inferred; declare the list with a type instead');
+        }
+        if (valueType === null || valueType === 'error') valueType = 'any';
+        this.declareVariable(ctx, ctx.ID().getText(), valueType, null, true);
+        return null;
+    };
+
     // --------------------------------------------------------- assignments --
 
     visitAssignForward = (ctx: AssignForwardContext): null => {
@@ -307,24 +364,31 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     /**
      * The type a target holds: a variable's declared type, or a list's item
      * type for `xs[i]` and `2nd item of xs`. Null once a problem is reported.
+     * A constant cannot be the whole target, but its items may be (the name
+     * is fixed, the list it refers to is not).
      */
-    private typeOfTarget(target: TargetContext): string | null {
+    private typeOfTarget(target: TargetContext, writing = true): string | null {
         if (target instanceof NameTargetContext) {
             const name = target.ID().getText();
-            if (!this.isVisible(name)) {
+            const b = this.binding(name);
+            if (b === null) {
                 this.error(target, `variable '${name}' is not declared`);
                 return null;
             }
-            return this.typeOf(name);
+            if (writing && b.constant) {
+                this.error(target, `'${name}' is a constant and cannot be changed`);
+                return null;
+            }
+            return b.type;
         }
         if (target instanceof IndexTargetContext) {
-            const base = this.typeOfTarget(target.target());
+            const base = this.typeOfTarget(target.target(), false);
             this.requireIndex(target.expression(), this.visit(target.expression()));
             return this.itemTypeOf(target, base);
         }
         const ordinal = target as OrdinalTargetContext;
         this.checkOrdinal(ordinal, ordinal.ORDINAL());
-        return this.itemTypeOf(ordinal, this.typeOfTarget(ordinal.target()));
+        return this.itemTypeOf(ordinal, this.typeOfTarget(ordinal.target(), false));
     }
 
     /** The item type of a list type; reports when the base is not a list. */
@@ -504,6 +568,19 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
             this.requireIndex(ctx.expression(1), this.visit(ctx.expression(1)));
         }
         return this.popResult(ctx, listType);
+    };
+
+    /** `lock xs;`, `sort the scores;` - a one-list verb, checked as its builtin. */
+    visitListStatement = (ctx: ListStatementContext): null => {
+        this.checkBuiltin(ctx, ctx._verb.text!, [this.visit(ctx.expression())]);
+        return null;
+    };
+
+    /** `position of x in xs` is position(xs, x). */
+    visitPositionExpr = (ctx: PositionExprContext): string => {
+        const valueType = this.visit(ctx.expression(0));
+        const listType = this.visit(ctx.expression(1));
+        return this.checkBuiltin(ctx, 'position', [listType, valueType]);
     };
 
     private popResult(ctx: ParserRuleContext, listType: string | null): string {
@@ -716,7 +793,8 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
         if (e instanceof EqExprContext) {
             this.warn(e, "comparison has no effect; to assign, use 'set ... to', '<-' or '='");
         } else if (!(e instanceof CallExprContext) && !(e instanceof InputExprContext)
-            && !(e instanceof PopExprContext) && !(e instanceof PopCallContext)) {
+            && !(e instanceof PopExprContext) && !(e instanceof PopCallContext)
+            && !(e instanceof MethodCallContext)) {
             this.warn(e, 'expression has no effect');
         }
         return null;
@@ -813,9 +891,11 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
             const pred = ctx._pred.type;
             const ok = pred === VoxParser.EMPTY
                 ? t === 'string' || t === 'character' || isList(t)
-                : pred === VoxParser.EVEN || pred === VoxParser.ODD
-                    ? t === 'integer'
-                    : isNumeric(t);
+                : pred === VoxParser.LOCKED || pred === VoxParser.WRAPPING
+                    ? isList(t)
+                    : pred === VoxParser.EVEN || pred === VoxParser.ODD
+                        ? t === 'integer'
+                        : isNumeric(t);
             if (!ok) {
                 this.error(ctx, `operator '${predicateName(ctx._op.type, ctx._pred.text!)}'`
                     + ` cannot be applied to ${t}`);
@@ -915,9 +995,28 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
     };
 
     visitFunctionCall = (ctx: FunctionCallContext): string => {
-        const name = ctx.ID().getText();
-        const argTypes = ctx.expression_list().map(e => this.visit(e));
+        const args = ctx.expression_list();
+        return this.checkCall(ctx, ctx.ID().getText(), args, args.map(e => this.visit(e)));
+    };
 
+    /** `a.f(b)` is `f(a, b)`: the receiver is checked as the first argument. */
+    visitMethodCall = (ctx: MethodCallContext): string => {
+        const name = ctx.methodName().getText();
+        const args = ctx.expression_list();
+        const t = this.checkCall(ctx, name, args, args.map(e => this.visit(e)));
+        if (t === 'void' && !(ctx.parentCtx instanceof ExprStmtContext)) {
+            this.error(ctx, `procedure '${name}' returns nothing and cannot be used as a value`);
+            return 'error';
+        }
+        return t;
+    };
+
+    /** A call by name, however it was spelled: user function, builtin, or list operation. */
+    private checkCall(ctx: ParserRuleContext, name: string, args: ExpressionContext[],
+                      argTypes: (string | null)[]): string {
+        if (name === 'push' || name === 'insert' || name === 'pop') {
+            return this.checkListCall(ctx, name, args, argTypes);
+        }
         const sig = this.functions.get(name);
         if (!sig) {
             if (BUILTINS.has(name)) return this.checkBuiltin(ctx, name, argTypes);
@@ -944,21 +1043,49 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
             }
         }
         return sig.returnType;
-    };
+    }
+
+    /** push(xs, v), insert(xs, i, v), pop(xs), pop(xs, i) - reached through a dot. */
+    private checkListCall(ctx: ParserRuleContext, name: string, args: ExpressionContext[],
+                          argTypes: (string | null)[]): string {
+        const [min, max] = name === 'push' ? [2, 2] : name === 'insert' ? [3, 3] : [1, 2];
+        if (argTypes.length < min || argTypes.length > max) {
+            const want = min === max ? String(min) : `${min} or ${max}`;
+            this.error(ctx, `function '${name}' expects ${want} argument(s) but got ${argTypes.length}`);
+            return name === 'pop' ? 'error' : 'void';
+        }
+        switch (name) {
+            case 'push':
+                this.checkListOp(ctx, 'push', argTypes[0], argTypes[1]);
+                return 'void';
+            case 'insert':
+                this.requireIndex(args[1], argTypes[1]);
+                this.checkListOp(ctx, 'insert', argTypes[0], argTypes[2]);
+                return 'void';
+            default:
+                if (argTypes.length === 2) this.requireIndex(args[1], argTypes[1]);
+                return this.popResult(ctx, argTypes[0]);
+        }
+    }
 
     /** Arity and type checks for a builtin; returns its result type. */
     private checkBuiltin(ctx: ParserRuleContext, name: string,
                          argTypes: (string | null)[]): string {
         const spec = BUILTINS.get(name)!;
+        const first = argTypes[0];
         const result = (): string => {
-            if (spec.result === 'same') {
-                const t = argTypes[0];
-                return t === null || t === 'error' ? 'any' : t;
+            switch (spec.result) {
+                case 'same':
+                    return first === null || first === undefined || first === 'error' ? 'any' : first;
+                case 'element':
+                    return first !== null && first !== undefined && isList(first) ? elementOf(first) : 'any';
+                case 'numeric':
+                    if (argTypes.some(t => t === 'float')) return 'float';
+                    if (argTypes.some(t => t === 'any')) return 'any';
+                    return 'integer';
+                default:
+                    return spec.result;
             }
-            if (spec.result !== 'numeric') return spec.result;
-            if (argTypes.some(t => t === 'float')) return 'float';
-            if (argTypes.some(t => t === 'any')) return 'any';
-            return 'integer';
         };
         if (spec.params.length !== argTypes.length) {
             this.error(ctx, `function '${name}' expects ${spec.params.length}`
@@ -969,14 +1096,30 @@ export class SemanticAnalyzer extends VoxVisitor<string | null> {
             const got = argTypes[i];
             if (got === null || got === 'error' || got === 'any') continue;
             const kind = spec.params[i];
-            const ok = kind === 'num' ? isNumeric(got)
-                : kind === 'string' ? (got === 'string' || got === 'character')
-                : kind === 'list' ? isList(got)
-                : (got === 'string' || got === 'character' || isList(got)); // sized
+            let ok: boolean;
+            let want: string;
+            switch (kind) {
+                case 'num':    ok = isNumeric(got); want = 'a number'; break;
+                case 'string': ok = got === 'string' || got === 'character'; want = 'string'; break;
+                case 'list':   ok = isList(got); want = 'a list'; break;
+                case 'sized':  ok = got === 'string' || got === 'character' || isList(got); want = 'a string or a list'; break;
+                case 'sortable':
+                    ok = isList(got) && !isList(elementOf(got));
+                    want = 'a list of numbers or strings';
+                    break;
+                case 'numlist': {
+                    const element = isList(got) ? elementOf(got) : '';
+                    ok = isList(got) && (isNumeric(element) || element === 'any');
+                    want = 'a list of numbers';
+                    break;
+                }
+                default: { // item: must fit the first argument's item type
+                    const element = first !== null && first !== undefined && isList(first) ? elementOf(first) : 'any';
+                    ok = fits(element, got) !== 'no';
+                    want = element;
+                }
+            }
             if (!ok) {
-                const want = kind === 'num' ? 'a number'
-                    : kind === 'string' ? 'string'
-                    : kind === 'list' ? 'a list' : 'a string or a list';
                 this.error(ctx, `argument ${i + 1} of '${name}' expects ${want} but got ${got}`);
             }
         }

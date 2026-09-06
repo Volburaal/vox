@@ -1,5 +1,5 @@
 import {
-    VoxValue, VoxRuntimeError, display, truthy, arithmetic, compare, coerceInput,
+    VoxValue, VoxList, VoxRuntimeError, display, truthy, arithmetic, compare, coerceInput,
     negate, cast, builtin, equal, defaultValue, asList, checkIndex, describe,
 } from './values.js';
 
@@ -244,7 +244,7 @@ export class IRExecutor {
                     this.require(toks, 2, raw);
                     const items: VoxValue[] = [];
                     for (let i = 2; i < toks.length; i++) items.push(this.resolve(toks[i]));
-                    this.frame().locals.set(toks[1], items);
+                    this.frame().locals.set(toks[1], new VoxList(items));
                     this.pc++;
                     break;
                 }
@@ -258,7 +258,7 @@ export class IRExecutor {
                     if (count < 0n) throw new VoxRuntimeError(`cannot make a list of ${count} items`);
                     const items: VoxValue[] = [];
                     for (let i = 0n; i < count; i++) items.push(defaultValue(toks[3]));
-                    this.frame().locals.set(toks[1], items);
+                    this.frame().locals.set(toks[1], new VoxList(items));
                     this.pc++;
                     break;
                 }
@@ -266,8 +266,8 @@ export class IRExecutor {
                 case 'list_get': {
                     this.require(toks, 4, raw);
                     const list = asList(this.resolve(toks[2]));
-                    const i = checkIndex(this.resolve(toks[3]), list.length, false);
-                    this.frame().locals.set(toks[1], list[i]);
+                    const i = checkIndex(this.resolve(toks[3]), list, false);
+                    this.frame().locals.set(toks[1], list.items[i]);
                     this.pc++;
                     break;
                 }
@@ -275,15 +275,17 @@ export class IRExecutor {
                 case 'list_set': {
                     this.require(toks, 4, raw);
                     const list = asList(this.resolve(toks[1]));
-                    const i = checkIndex(this.resolve(toks[2]), list.length, false);
-                    list[i] = this.resolve(toks[3]);
+                    const i = checkIndex(this.resolve(toks[2]), list, false);
+                    list.items[i] = this.resolve(toks[3]);
                     this.pc++;
                     break;
                 }
 
                 case 'list_push': {
                     this.require(toks, 3, raw);
-                    asList(this.resolve(toks[1])).push(this.resolve(toks[2]));
+                    const list = asList(this.resolve(toks[1]));
+                    if (list.locked) throw new VoxRuntimeError('cannot push to a locked list');
+                    list.items.push(this.resolve(toks[2]));
                     this.pc++;
                     break;
                 }
@@ -291,8 +293,9 @@ export class IRExecutor {
                 case 'list_insert': {
                     this.require(toks, 4, raw);
                     const list = asList(this.resolve(toks[1]));
-                    const i = checkIndex(this.resolve(toks[2]), list.length, true);
-                    list.splice(i, 0, this.resolve(toks[3]));
+                    if (list.locked) throw new VoxRuntimeError('cannot insert into a locked list');
+                    const i = checkIndex(this.resolve(toks[2]), list, true);
+                    list.items.splice(i, 0, this.resolve(toks[3]));
                     this.pc++;
                     break;
                 }
@@ -300,11 +303,12 @@ export class IRExecutor {
                 case 'list_pop': {
                     this.require(toks, 3, raw);
                     const list = asList(this.resolve(toks[2]));
-                    if (list.length === 0) throw new VoxRuntimeError('cannot pop from an empty list');
+                    if (list.locked) throw new VoxRuntimeError('cannot pop from a locked list');
+                    if (list.items.length === 0) throw new VoxRuntimeError('cannot pop from an empty list');
                     const i = toks.length >= 4
-                        ? checkIndex(this.resolve(toks[3]), list.length, false)
-                        : list.length - 1;
-                    this.frame().locals.set(toks[1], list.splice(i, 1)[0]);
+                        ? checkIndex(this.resolve(toks[3]), list, false)
+                        : list.items.length - 1;
+                    this.frame().locals.set(toks[1], list.items.splice(i, 1)[0]);
                     this.pc++;
                     break;
                 }
@@ -313,7 +317,7 @@ export class IRExecutor {
                     this.require(toks, 4, raw);
                     const list = asList(this.resolve(toks[2]));
                     const wanted = this.resolve(toks[3]);
-                    this.frame().locals.set(toks[1], list.some(item => equal(item, wanted)));
+                    this.frame().locals.set(toks[1], list.items.some(item => equal(item, wanted)));
                     this.pc++;
                     break;
                 }

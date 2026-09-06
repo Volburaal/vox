@@ -2,7 +2,8 @@ import VoxVisitor from './gen/VoxVisitor.js';
 import VoxParser, {
     ProgramContext, PrototypeContext, DefinitionContext, MainFunctionContext,
     BlockContext, DeclForwardContext, DeclReverseContext, DeclLetContext,
-    DeclSizedContext, DeclListIsContext, AssignForwardContext,
+    DeclSizedContext, DeclListIsContext, DeclConstantContext,
+    DeclConstantLetContext, AssignForwardContext,
     AssignReverseContext, SetToContext, SwapStmtContext, TargetContext,
     NameTargetContext, IndexTargetContext, OrdinalTargetContext,
     IfStatementContext, WhileLoopContext, ForLoopContext, RangeLoopContext,
@@ -11,7 +12,8 @@ import VoxParser, {
     OpAssignContext, IncreaseByContext, DecreaseByContext, AddToContext,
     TakeFromContext, MultiplyByContext, DivideByContext, DoubleStmtContext,
     HalveStmtContext, PushToContext, InsertIntoContext, PushCallContext,
-    InsertCallContext, PopCallContext, PrintStatementContext,
+    InsertCallContext, PopCallContext, ListStatementContext, MethodCallContext,
+    PositionExprContext, PrintStatementContext,
     ReturnStatementContext, ParenExprContext, IndexExprContext,
     CastExprContext, BuiltinExprContext, OrdinalExprContext, PopExprContext,
     AskExprContext, NegExprContext, SquaredExprContext, NotExprContext,
@@ -113,6 +115,7 @@ export class IRBuilder extends VoxVisitor<string | null> {
         } else {
             this.emitDefault(name, typeName(ctx.datatype()));
         }
+        if (ctx.FIXED()) this.emit(`builtin ${this.newTemp()} lock ${name}`);
         return null;
     };
 
@@ -136,6 +139,7 @@ export class IRBuilder extends VoxVisitor<string | null> {
         } else {
             this.emit('list ' + name);
         }
+        if (ctx.FIXED()) this.emit(`builtin ${this.newTemp()} lock ${name}`);
         return null;
     };
 
@@ -143,6 +147,17 @@ export class IRBuilder extends VoxVisitor<string | null> {
         const name = ctx.ID().getText();
         if (ctx._init) this.emit(`set ${name} ${this.visit(ctx._init)}`);
         else this.emit('list ' + name);
+        return null;
+    };
+
+    // Constants are ordinary variables at run time; the checker guards them.
+    visitDeclConstant = (ctx: DeclConstantContext): null => {
+        this.emit(`set ${ctx.ID().getText()} ${this.visit(ctx.expression())}`);
+        return null;
+    };
+
+    visitDeclConstantLet = (ctx: DeclConstantLetContext): null => {
+        this.emit(`set ${ctx.ID().getText()} ${this.visit(ctx.expression())}`);
         return null;
     };
 
@@ -312,6 +327,22 @@ export class IRBuilder extends VoxVisitor<string | null> {
         const index = ctx.expression_list().length > 1 ? ' ' + this.visit(ctx.expression(1)) : '';
         const dest = this.newTemp();
         this.emit(`list_pop ${dest} ${list}${index}`);
+        return dest;
+    };
+
+    /** `lock xs;`, `sort the scores;` - the verb is a builtin with one operand. */
+    visitListStatement = (ctx: ListStatementContext): null => {
+        const list = this.visit(ctx.expression());
+        this.emit(`builtin ${this.newTemp()} ${ctx._verb.text} ${list}`);
+        return null;
+    };
+
+    /** `position of x in xs` is position(xs, x): the operands swap places. */
+    visitPositionExpr = (ctx: PositionExprContext): string => {
+        const value = this.visit(ctx.expression(0));
+        const list = this.visit(ctx.expression(1));
+        const dest = this.newTemp();
+        this.emit(`builtin ${dest} position ${list} ${value}`);
         return dest;
     };
 
@@ -656,6 +687,14 @@ export class IRBuilder extends VoxVisitor<string | null> {
             this.emit(`${negated ? 'ne' : 'eq'} ${dest} ${length} 0`);
             return dest;
         }
+        if (pred === VoxParser.LOCKED || pred === VoxParser.WRAPPING) {
+            const flag = this.newTemp();
+            this.emit(`builtin ${flag} ${pred === VoxParser.LOCKED ? 'locked' : 'wrapping'} ${value}`);
+            if (!negated) return flag;
+            const inverted = this.newTemp();
+            this.emit(`not ${inverted} ${flag}`);
+            return inverted;
+        }
         const dest = this.newTemp();
         if (pred === VoxParser.POSITIVE) {
             this.emit(`${negated ? 'le' : 'gt'} ${dest} ${value} 0`);
@@ -720,24 +759,34 @@ export class IRBuilder extends VoxVisitor<string | null> {
     visitCallExpr = (ctx: CallExprContext): string | null =>
         this.visit(ctx.functionCall());
 
-    visitFunctionCall = (ctx: FunctionCallContext): string => {
-        const name = ctx.ID().getText();
-        const args = ctx.expression_list().map(e => this.visit(e));
-        const dest = this.newTemp();
+    visitFunctionCall = (ctx: FunctionCallContext): string =>
+        this.emitCall(ctx.ID().getText(), ctx.expression_list().map(e => this.visit(e)!));
 
-        if (!this.userFunctions.has(name) && BUILTINS.has(name)) {
+    /** `a.f(b)` is `f(a, b)`: the receiver simply becomes the first operand. */
+    visitMethodCall = (ctx: MethodCallContext): string =>
+        this.emitCall(ctx.methodName().getText(), ctx.expression_list().map(e => this.visit(e)!));
+
+    /** A call by name: a list operation, a builtin, or the user's own function. */
+    private emitCall(name: string, args: string[]): string {
+        const dest = this.newTemp();
+        if (name === 'push') {
+            this.emit(`list_push ${args[0]} ${args[1]}`);
+        } else if (name === 'insert') {
+            this.emit(`list_insert ${args[0]} ${args[1]} ${args[2]}`);
+        } else if (name === 'pop') {
+            this.emit(`list_pop ${dest} ${args[0]}` + (args.length > 1 ? ' ' + args[1] : ''));
+        } else if (!this.userFunctions.has(name) && BUILTINS.has(name)) {
             let line = `builtin ${dest} ${name}`;
             for (const a of args) line += ' ' + a;
             this.emit(line);
-            return dest;
+        } else {
+            let line = 'call ' + name;
+            for (const a of args) line += ' ' + a;
+            line += ' -> ' + dest;
+            this.emit(line);
         }
-
-        let line = 'call ' + name;
-        for (const a of args) line += ' ' + a;
-        line += ' -> ' + dest;
-        this.emit(line);
         return dest;
-    };
+    }
 
     visitInputExpr = (_ctx: InputExprContext): string => {
         const dest = this.newTemp();

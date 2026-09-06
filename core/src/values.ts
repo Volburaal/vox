@@ -8,10 +8,20 @@
  *   number  -> Vox float
  *   boolean -> Vox boolean
  *   string  -> Vox string
- *   array   -> Vox list      (a reference: two names may share one list)
+ *   VoxList -> Vox list      (a reference: two names may share one list)
  *   null    -> unset
  */
-export type VoxValue = bigint | number | boolean | string | VoxValue[] | null;
+export type VoxValue = bigint | number | boolean | string | VoxList | null;
+
+/**
+ * A list, with the two switches a program can flip on it: `lock` freezes its
+ * size (items stay writable), `wrap` makes indexes count around the ends.
+ */
+export class VoxList {
+    locked = false;
+    wrapping = false;
+    constructor(public items: VoxValue[] = []) {}
+}
 
 /** Raised for anything the program does wrong at run time. */
 export class VoxRuntimeError extends Error {
@@ -31,7 +41,7 @@ const MAX_POW_EXPONENT = 1_000_000n;
 const isNumber = (v: VoxValue): v is bigint | number =>
     typeof v === 'bigint' || typeof v === 'number';
 
-const isList = (v: VoxValue): v is VoxValue[] => Array.isArray(v);
+const isList = (v: VoxValue): v is VoxList => v instanceof VoxList;
 
 /**
  * Renders a float the way Java's Double.toString does (the reference
@@ -62,7 +72,9 @@ export function display(v: VoxValue): string {
     if (v === null) return 'null';
     if (typeof v === 'bigint') return v.toString();
     if (typeof v === 'number') return formatFloat(v);
-    if (isList(v)) return '[' + v.map(item => typeof item === 'string' ? quote(item) : display(item)).join(', ') + ']';
+    if (isList(v)) {
+        return '[' + v.items.map(item => typeof item === 'string' ? quote(item) : display(item)).join(', ') + ']';
+    }
     return String(v);
 }
 
@@ -71,7 +83,8 @@ export function truthy(v: VoxValue): boolean {
     if (typeof v === 'boolean') return v;
     if (typeof v === 'bigint') return v !== 0n;
     if (typeof v === 'number') return v !== 0;
-    return v.length > 0; // strings and lists: non-empty
+    if (isList(v)) return v.items.length > 0;
+    return v.length > 0;
 }
 
 export function describe(v: VoxValue): string {
@@ -155,7 +168,8 @@ export function equal(left: VoxValue, right: VoxValue): boolean {
         return typeof left === typeof right ? left === right : Number(left) === Number(right);
     }
     if (isList(left) && isList(right)) {
-        return left.length === right.length && left.every((v, i) => equal(v, right[i]));
+        return left.items.length === right.items.length
+            && left.items.every((v, i) => equal(v, right.items[i]));
     }
     return left === right;
 }
@@ -170,23 +184,7 @@ export function compare(op: string, left: VoxValue, right: VoxValue): boolean {
             `cannot order-compare with an unset value using '${op}'`);
     }
 
-    let c: number;
-    if (isNumber(left) && isNumber(right)) {
-        if (typeof left === 'bigint' && typeof right === 'bigint') {
-            c = left < right ? -1 : left > right ? 1 : 0;
-        } else {
-            const l = Number(left), r = Number(right);
-            c = l < r ? -1 : l > r ? 1 : 0;
-        }
-    } else if (typeof left === 'string' && typeof right === 'string') {
-        c = left < right ? -1 : left > right ? 1 : 0; // code-unit order, like Java
-    } else if (typeof left === 'boolean' && typeof right === 'boolean') {
-        c = Number(left) - Number(right);
-    } else {
-        throw new VoxRuntimeError(
-            `cannot compare ${describe(left)} with ${describe(right)}`);
-    }
-
+    const c = order(left, right);
     switch (op) {
         case 'lt': return c < 0;
         case 'gt': return c > 0;
@@ -194,6 +192,24 @@ export function compare(op: string, left: VoxValue, right: VoxValue): boolean {
         case 'ge': return c >= 0;
         default: throw new VoxRuntimeError('unknown comparison op: ' + op);
     }
+}
+
+/** Ordering for numbers, strings and booleans; anything else cannot be ordered. */
+function order(left: VoxValue, right: VoxValue): number {
+    if (isNumber(left) && isNumber(right)) {
+        if (typeof left === 'bigint' && typeof right === 'bigint') {
+            return left < right ? -1 : left > right ? 1 : 0;
+        }
+        const l = Number(left), r = Number(right);
+        return l < r ? -1 : l > r ? 1 : 0;
+    }
+    if (typeof left === 'string' && typeof right === 'string') {
+        return left < right ? -1 : left > right ? 1 : 0; // code-unit order, like Java
+    }
+    if (typeof left === 'boolean' && typeof right === 'boolean') {
+        return Number(left) - Number(right);
+    }
+    throw new VoxRuntimeError(`cannot compare ${describe(left)} with ${describe(right)}`);
 }
 
 /** Coerces one line of user input: integer, float, boolean, else string. */
@@ -254,23 +270,30 @@ export function defaultValue(irType: string): VoxValue {
         case 'string':
         case 'character': return '';
         default:
-            if (irType.startsWith('list<')) return [];
+            if (irType.startsWith('list<')) return new VoxList();
             throw new VoxRuntimeError('unknown type: ' + irType);
     }
 }
 
-export function asList(v: VoxValue): VoxValue[] {
+export function asList(v: VoxValue): VoxList {
     if (isList(v)) return v;
     throw new VoxRuntimeError(`cannot use ${describe(v)} as a list`);
 }
 
 /**
  * Validates a list index: an integer from 0 to length - 1 (or to length when
- * inserting, so an item can go at the end). No negative or wrapping indexes.
+ * inserting, so an item can go at the end). A wrapping list counts around
+ * its ends instead - `-1` is the last item - except for insert positions,
+ * where wrapping the end to the front would put items in the wrong place.
  */
-export function checkIndex(index: VoxValue, length: number, allowEnd: boolean): number {
+export function checkIndex(index: VoxValue, list: VoxList, allowEnd: boolean): number {
     if (typeof index !== 'bigint') {
         throw new VoxRuntimeError(`index must be an integer but got ${describe(index)}`);
+    }
+    const length = list.items.length;
+    if (list.wrapping && !allowEnd && length > 0) {
+        const n = BigInt(length);
+        return Number(((index % n) + n) % n);
     }
     const limit = allowEnd ? length : length - 1;
     if (index < 0n || index > BigInt(limit)) {
@@ -279,7 +302,7 @@ export function checkIndex(index: VoxValue, length: number, allowEnd: boolean): 
     return Number(index);
 }
 
-/** The builtin functions. Spoken forms map onto the same names. */
+/** The builtin functions. Spoken forms and dot calls map onto the same names. */
 export function builtin(name: string, args: VoxValue[]): VoxValue {
     const arity = (n: number): void => {
         if (args.length !== n) {
@@ -299,7 +322,7 @@ export function builtin(name: string, args: VoxValue[]): VoxValue {
         }
         return v;
     };
-    const list = (v: VoxValue): VoxValue[] => {
+    const list = (v: VoxValue): VoxList => {
         if (!isList(v)) {
             throw new VoxRuntimeError(`'${name}' needs a list but got ${describe(v)}`);
         }
@@ -334,13 +357,57 @@ export function builtin(name: string, args: VoxValue[]): VoxValue {
         case 'length': {
             arity(1);
             const v = args[0];
-            if (isList(v)) return BigInt(v.length);
+            if (isList(v)) return BigInt(v.items.length);
             if (typeof v === 'string') return BigInt(v.length);
             throw new VoxRuntimeError(`'length' needs a string or a list but got ${describe(v)}`);
         }
         case 'uppercase': arity(1); return str(args[0]).toUpperCase();
         case 'lowercase': arity(1); return str(args[0]).toLowerCase();
-        case 'copy':      arity(1); return [...list(args[0])]; // one level deep
+        case 'copy':      arity(1); return new VoxList([...list(args[0]).items]); // one level deep
+
+        // ---- list switches ------------------------------------------------
+        case 'lock':     arity(1); list(args[0]).locked = true; return null;
+        case 'unlock':   arity(1); list(args[0]).locked = false; return null;
+        case 'wrap':     arity(1); list(args[0]).wrapping = true; return null;
+        case 'unwrap':   arity(1); list(args[0]).wrapping = false; return null;
+        case 'locked':   arity(1); return list(args[0]).locked;
+        case 'wrapping': arity(1); return list(args[0]).wrapping;
+
+        // ---- ordering and aggregates ---------------------------------------
+        case 'sort': {
+            arity(1);
+            const l = list(args[0]);
+            if (l.items.some(isList)) throw new VoxRuntimeError('cannot sort a list of lists');
+            l.items.sort(order); // stable; mixed types fail inside order()
+            return null;
+        }
+        case 'reverse':  arity(1); list(args[0]).items.reverse(); return null;
+        case 'sum': {
+            arity(1);
+            let total: VoxValue = 0n;
+            for (const v of list(args[0]).items) {
+                if (!isNumber(v)) throw new VoxRuntimeError(`'sum' needs a list of numbers but got ${describe(v)}`);
+                total = arithmetic('add', total, v);
+            }
+            return total;
+        }
+        case 'largest':
+        case 'smallest': {
+            arity(1);
+            const items = list(args[0]).items;
+            if (items.length === 0) throw new VoxRuntimeError(`${name} of an empty list`);
+            let best = items[0];
+            for (const v of items) {
+                const c = order(v, best);
+                if (name === 'largest' ? c > 0 : c < 0) best = v;
+            }
+            return best;
+        }
+        case 'position': {
+            arity(2);
+            const index = list(args[0]).items.findIndex(v => equal(v, args[1]));
+            return BigInt(index); // -1 when absent
+        }
         default:
             throw new VoxRuntimeError('unknown builtin: ' + name);
     }
