@@ -1,0 +1,13 @@
+main {
+    string[] playlist <- ["intro", "news", "weather"];
+    wrap playlist;                        // indexes count around the ends
+
+    say playlist[3];                      // back to the start
+    say playlist[-1];                     // the last item
+    say 5th item of playlist;             // 5 wraps to the 2nd
+    playlist[-1] <- "sport";
+    say playlist;
+
+    unwrap playlist;
+    say playlist is wrapping;
+}

@@ -1,0 +1,6 @@
+main {
+    fixed integer slots[2];
+    slots[0] <- 7;                        // fine: writing an item
+    say slots;
+    push 9 to slots;                      // not fine: changing the size
+}

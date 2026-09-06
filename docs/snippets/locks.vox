@@ -1,0 +1,13 @@
+main {
+    integer[] top <- [90, 85, 70];
+    lock top;                             // the size is frozen; items stay writable
+    top[2] <- 72;
+    say top, " locked: ", top is locked;
+
+    unlock top;
+    push 65 to top;
+    say top, " locked: ", top.locked();
+
+    fixed integer slots[3];               // born locked: an array, in C terms
+    say slots, " ", slots is locked;
+}

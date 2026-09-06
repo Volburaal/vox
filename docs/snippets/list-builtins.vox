@@ -1,0 +1,16 @@
+main {
+    integer[] scores <- [72, 95, 64, 88];
+
+    sort scores;
+    say scores;
+    reverse scores;
+    say scores;
+
+    say "sum ", sum of scores, ", best ", largest of scores, ", worst ", smallest of scores;
+    say "95 sits at ", position of 95 in scores;
+    say "7 sits at ", position of 7 in scores;     // -1: not there
+
+    string[] crew <- ["cy", "ann", "bob"];
+    crew.sort();
+    say crew, " ", crew.largest();
+}

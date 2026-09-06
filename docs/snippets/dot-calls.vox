@@ -1,0 +1,15 @@
+integer twice(integer n) {
+    return n * 2;
+}
+
+main {
+    integer[] scores <- [70, 95, 80];
+
+    scores.push(60);                      // the same as: push 60 to scores
+    say scores.length(), " items, largest ", scores.largest();
+    say "vox".uppercase(), " ", 16.sqrt();
+
+    // Your own functions work the same way: the receiver is the first argument.
+    say 21.twice(), " ", scores[1].twice();
+    say scores.copy().pop();              // calls chain left to right
+}

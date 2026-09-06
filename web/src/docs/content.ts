@@ -126,6 +126,23 @@ export const CATEGORIES: DocCategory[] = [
         ],
       },
       {
+        id: "constants",
+        title: "Constants",
+        body: [
+          "`constant integer MAX <- 3` and `let NAME always be value` declare names that can never be assigned again - not with `<-`, not with `set`, not with `increment`. Trying is a compile error, so the mistake never reaches a run.",
+          "A constant list is a constant *name*: the list it refers to can still grow and change, because lists are references. When it is the list itself that must not change size, `lock` it.",
+        ],
+        snippet: "constants",
+      },
+      {
+        id: "constant-error",
+        title: "What a constant refuses",
+        body: [
+          "The checker reports the assignment where it is written, with the name, rather than letting a value drift at run time.",
+        ],
+        snippet: "constant-error",
+      },
+      {
         id: "casting",
         title: "Converting between types",
         body: [
@@ -379,6 +396,24 @@ export const CATEGORIES: DocCategory[] = [
         },
       },
       {
+        id: "list-builtins",
+        title: "Sorting, totals and searching",
+        body: [
+          "The operations every first course reaches for are built in, each with a spoken form, a function form and a dot form. `sort` and `reverse` change the list in place; the rest leave it alone.",
+        ],
+        snippet: "list-builtins",
+        table: {
+          head: ["Spoken", "Also", "Result"],
+          rows: [
+            ["`sort xs`", "`sort(xs)`, `xs.sort()`", "in place, smallest first; numbers, strings or booleans"],
+            ["`reverse xs`", "`reverse(xs)`, `xs.reverse()`", "in place"],
+            ["`sum of xs`", "`sum(xs)`, `xs.sum()`", "`0` for an empty list; a float if any item is"],
+            ["`largest of xs`, `smallest of xs`", "`largest(xs)`, `xs.smallest()`", "an item; an empty list is a runtime error"],
+            ["`position of x in xs`", "`position(xs, x)`, `xs.position(x)`", "the index of the first match, or `-1`"],
+          ],
+        },
+      },
+      {
         id: "for-each",
         title: "for each",
         body: [
@@ -395,6 +430,32 @@ export const CATEGORIES: DocCategory[] = [
           "When you want an independent list, say so: `copy of xs` makes a new list with the same items (one level deep). `is` compares lists item by item, not by identity.",
         ],
         snippet: "list-references",
+      },
+      {
+        id: "locks",
+        title: "Locking a list's size",
+        body: [
+          "`lock xs` freezes a list's size: `push`, `insert` and `pop` become runtime errors until `unlock xs`. Items stay writable - it is the shape that is fixed, not the contents - which makes a locked list exactly a C array, switchable at will.",
+          "The lock belongs to the list, not the name: every alias sees it, and a function that receives a locked list cannot grow it. `fixed integer xs[5]` declares a list that is born locked, and `xs is locked` asks.",
+        ],
+        snippet: "locks",
+      },
+      {
+        id: "locked-error",
+        title: "A locked list refuses to grow",
+        body: [
+          "The error says which operation was refused, at the moment it was attempted.",
+        ],
+        snippet: "locked-error",
+      },
+      {
+        id: "wrapping",
+        title: "Wrapping around",
+        body: [
+          "Normally an index outside `0` to `length - 1` is an error. `wrap xs` turns the list into a ring: index `i` becomes `((i mod n) + n) mod n`, so `-1` is the last item, `n` is the first again, and the ordinals follow suit. `unwrap xs` restores the strict rule, and `xs is wrapping` asks.",
+          "Wrapping applies to reading, writing, `pop at` and ordinals - never to `insert at`, whose valid positions run to the length itself, where wrapping would silently put the item at the wrong end. An empty list has nothing to wrap to and still errors.",
+        ],
+        snippet: "wrapping",
       },
       {
         id: "list-errors",
@@ -458,6 +519,19 @@ export const CATEGORIES: DocCategory[] = [
             ],
           ],
         },
+      },
+      {
+        id: "dot-calls",
+        title: "Calling with a dot",
+        body: [
+          "`a.f(b)` means exactly `f(a, b)`: whatever stands before the dot becomes the first argument. That single rule gives every list operation and every builtin a method spelling - `xs.push(5)`, `s.length()`, `xs.sort()` - and gives your own functions one too, with no classes involved.",
+          "Parentheses are always required, so a call always looks like a call. The spoken forms and the plain function forms remain, and all three compile to the same instruction.",
+        ],
+        snippet: "dot-calls",
+        notes: [
+          "Math reads better as functions: `sqrt(x)` and `max(a, b)` are legal after a dot, but nobody should have to write `x.sqrt()`.",
+          "Errors name the function whichever spelling you used: `xs.push(\"a\")` reports *cannot push string into list of integer*.",
+        ],
       },
     ],
   },
@@ -532,7 +606,7 @@ export const REFERENCE: {
       head: ["Level", "Operators"],
       rows: [
         ["1", "`( )`"],
-        ["2", "`xs[i]` (an item)"],
+        ["2", "`xs[i]` (an item), `a.f(b)` (a dot call)"],
         ["3", "`as` (cast)"],
         ["4", "`squared`, `cubed`"],
         ["5", "spoken builtins, `Nth item of`, `pop`, `ask`"],
@@ -568,7 +642,7 @@ export const REFERENCE: {
         ],
         ["Loop control", "`stop`, `break`, `skip`, `continue`"],
         ["I/O", "`print`, `say`, `input`, `ask`"],
-        ["Assignment", "`set`, `let`, `be`, `swap`, `the`"],
+        ["Assignment", "`set`, `let`, `be`, `swap`, `the`, `constant`, `always`"],
         [
           "Updates",
           "`increment`, `decrement`, `increase`, `decrease`, `add`, `subtract`, `take`, `remove`, `multiply`, `divide`, `double`, `halve`",
@@ -579,7 +653,7 @@ export const REFERENCE: {
         ],
         [
           "Lists",
-          "`list`, `in`, `at`, `push`, `insert`, `into`, `pop`, `contains`, and the phrases `for each`, `for every`, `is a list of`, `list of`, `item of`, `value of`, `copy of`",
+          "`list`, `in`, `at`, `push`, `insert`, `into`, `pop`, `contains`, `lock`, `unlock`, `wrap`, `unwrap`, `locked`, `wrapping`, `sort`, `reverse`, `fixed`, and the phrases `for each`, `for every`, `is a list of`, `list of`, `item of`, `value of`, `copy of`, `sum of`, `largest of`, `smallest of`, `position of`",
         ],
         [
           "Operators",

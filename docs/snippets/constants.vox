@@ -1,0 +1,10 @@
+main {
+    constant integer MAX_TRIES <- 3;
+    let STATION always be "Vox FM";
+
+    say STATION, " allows ", MAX_TRIES, " tries";
+
+    constant integer[] PRESETS <- [88, 92];
+    push 101 to PRESETS;                  // the name is fixed; the list it names is not
+    say PRESETS;
+}

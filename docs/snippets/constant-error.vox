@@ -1,0 +1,4 @@
+main {
+    constant integer MAX_TRIES <- 3;
+    MAX_TRIES <- 4;
+}
