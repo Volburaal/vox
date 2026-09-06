@@ -1,0 +1,15 @@
+main {
+    constant integer LIMIT <- 3;
+    let GREETING always be "hi";
+    constant integer[] BASE <- [1, 2];
+
+    say LIMIT * 2, " ", GREETING;
+    push 3 to BASE;                          // the name is constant, the list is not
+    BASE[0] <- 10;
+    say BASE;
+
+    for i from 1 to LIMIT {
+        print(i, " ");
+    }
+    print('\n');
+}

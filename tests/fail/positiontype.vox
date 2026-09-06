@@ -1,0 +1,4 @@
+main {
+    integer[] xs <- [1];
+    say position of "a" in xs;
+}

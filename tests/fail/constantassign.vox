@@ -1,0 +1,5 @@
+main {
+    constant integer MAX <- 5;
+    MAX <- 6;
+    increment MAX;
+}

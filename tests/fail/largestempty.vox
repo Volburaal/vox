@@ -1,0 +1,4 @@
+main {
+    integer[] xs;
+    say largest of xs;
+}

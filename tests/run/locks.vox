@@ -1,0 +1,25 @@
+main {
+    integer[] xs <- [1, 2, 3];
+    lock xs;
+    say xs is locked, " ", xs.locked();
+    xs[0] <- 10;                             // items stay writable
+    say xs;
+    unlock xs;
+    push 4 to xs;
+    say xs is locked, " ", xs;
+
+    fixed integer zeros[3];
+    say zeros, " ", zeros is locked;
+
+    integer[] ring <- [1, 2, 3];
+    wrap ring;
+    say ring[3], " ", ring[-1], " ", ring[-4], " ", 4th item of ring;
+    ring[-1] <- 30;
+    say ring, " ", ring is wrapping;
+    unwrap ring;
+    say ring is wrapping, " ", ring.wrapping();
+
+    integer[] same <- xs;                    // one list, one lock
+    lock(same);
+    say xs is locked;
+}

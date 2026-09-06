@@ -1,0 +1,5 @@
+main {
+    integer[] xs <- [1];
+    lock xs;
+    push 2 to xs;
+}

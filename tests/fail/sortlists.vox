@@ -1,0 +1,4 @@
+main {
+    integer[][] g <- [[1]];
+    sort g;
+}

@@ -1,0 +1,5 @@
+main {
+    integer[] xs <- [1, 2];
+    wrap xs;
+    insert 5 into xs at -1;
+}

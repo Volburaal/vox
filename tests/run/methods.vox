@@ -1,0 +1,22 @@
+integer twice(integer n) {
+    return n * 2;
+}
+
+float average(integer[] xs) {
+    return sum(xs) as float / length(xs);
+}
+
+main {
+    integer[] xs <- [3, 1, 2];
+    xs.push(4);
+    xs.insert(0, 9);
+    say xs;
+    say xs.pop(), " ", xs.pop(1);
+    say xs;
+    say xs.length(), " ", "vox".length(), " ", "vox".uppercase();
+    say 16.sqrt(), " ", 7.twice(), " ", xs.average();
+    xs.sort();
+    say xs, " ", xs.sum(), " ", xs.largest(), " ", xs.position(9);
+    say xs.copy().pop(), " ", xs;
+    say xs[0].twice().twice();
+}

@@ -1,0 +1,3 @@
+main {
+    fixed integer n <- 1;
+}

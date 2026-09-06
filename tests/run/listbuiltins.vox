@@ -1,0 +1,20 @@
+main {
+    integer[] xs <- [5, 3, 9, 1];
+    sort xs;
+    say xs;
+    reverse xs;
+    say xs;
+    say sum of xs, " ", largest of xs, " ", smallest of xs;
+    say position of 3 in xs, " ", position of 7 in xs;
+    say sum(xs), " ", largest(xs), " ", smallest(xs), " ", position(xs, 9);
+
+    string[] names <- ["cy", "ann", "bob"];
+    sort the names;
+    say names, " ", largest of names;
+
+    float[] temps <- [2.5, 1.5];
+    say sum of temps, " ", smallest of temps;
+
+    integer[] none;
+    say sum of none, " ", position of 1 in none;
+}
