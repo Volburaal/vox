@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Play, ShieldCheck, ChevronRight } from "lucide-react";
 import Nav from "../components/Nav";
 import Snippet from "../components/Snippet";
+import VoxHi from "../components/VoxHi";
 import GithubIcon from "../components/GithubIcon";
 import { CATEGORIES, REFERENCE, type DocTable } from "../docs/content";
 import { LINKS } from "../site";
@@ -105,7 +106,8 @@ export default function Docs() {
   const active = useScrollSpy(SECTION_IDS);
 
   return (
-    <div className="neon-backdrop min-h-full">
+    <div className="neon-backdrop relative min-h-full">
+      <VoxHi />
       <Nav />
 
       <div className="mx-auto max-w-7xl px-4 sm:px-6">

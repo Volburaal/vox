@@ -10,6 +10,7 @@ import {
 import Nav from "../components/Nav";
 import GithubIcon from "../components/GithubIcon";
 import Code from "../components/Code";
+import VoxHi from "../components/VoxHi";
 import { EXAMPLES } from "../examples";
 import { LINKS } from "../site";
 
@@ -99,7 +100,8 @@ const FEATURES = [
 
 export default function Landing() {
   return (
-    <div className="neon-backdrop min-h-full">
+    <div className="neon-backdrop relative min-h-full">
+      <VoxHi />
       <Nav />
 
       <main className="mx-auto max-w-6xl px-4 sm:px-6">
