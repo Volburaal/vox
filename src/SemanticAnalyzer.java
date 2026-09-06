@@ -29,11 +29,26 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         }
     }
 
-    /** What a builtin accepts per parameter, and what it returns. */
+    /** A variable in scope: its type and whether assignment to it is forbidden. */
+    private static final class Binding {
+        final String type;
+        final boolean constant;
+        Binding(String type, boolean constant) {
+            this.type = type;
+            this.constant = constant;
+        }
+    }
+
+    /**
+     * What a builtin accepts per parameter, and what it returns.
+     *   params: "num" | "string" | "sized" (string or list) | "list"
+     *         | "sortable" (a list of scalars) | "numlist" (a list of numbers)
+     *         | "item" (something that fits the first argument's item type)
+     *   result: a fixed type, "numeric" (float if any float), "same" (the
+     *           first argument's type), "element" (its item type) or "void"
+     */
     static final class BuiltinSpec {
-        /** "num", "string", "sized" (string or list) or "list", per parameter. */
         final String[] params;
-        /** A fixed type, "numeric" (float if any float) or "same" (the argument's type). */
         final String result;
         BuiltinSpec(String result, String... params) {
             this.result = result;
@@ -59,6 +74,20 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         BUILTINS.put("uppercase", new BuiltinSpec("string",  "string"));
         BUILTINS.put("lowercase", new BuiltinSpec("string",  "string"));
         BUILTINS.put("copy",      new BuiltinSpec("same",    "list"));
+        // list switches and their questions
+        BUILTINS.put("lock",      new BuiltinSpec("void",    "list"));
+        BUILTINS.put("unlock",    new BuiltinSpec("void",    "list"));
+        BUILTINS.put("wrap",      new BuiltinSpec("void",    "list"));
+        BUILTINS.put("unwrap",    new BuiltinSpec("void",    "list"));
+        BUILTINS.put("locked",    new BuiltinSpec("boolean", "list"));
+        BUILTINS.put("wrapping",  new BuiltinSpec("boolean", "list"));
+        // ordering and aggregates
+        BUILTINS.put("sort",      new BuiltinSpec("void",    "sortable"));
+        BUILTINS.put("reverse",   new BuiltinSpec("void",    "list"));
+        BUILTINS.put("sum",       new BuiltinSpec("element", "numlist"));
+        BUILTINS.put("largest",   new BuiltinSpec("element", "sortable"));
+        BUILTINS.put("smallest",  new BuiltinSpec("element", "sortable"));
+        BUILTINS.put("position",  new BuiltinSpec("integer", "list", "item"));
     }
 
     /** Maps a spoken builtin token onto its symbolic name. */
@@ -70,11 +99,14 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         if (ctx.CEIL_OF() != null) return "ceiling";
         if (ctx.UPPER_OF() != null) return "uppercase";
         if (ctx.COPY_OF() != null) return "copy";
+        if (ctx.SUM_OF() != null) return "sum";
+        if (ctx.LARGEST_OF() != null) return "largest";
+        if (ctx.SMALLEST_OF() != null) return "smallest";
         return "lowercase";
     }
 
     private final Map<String, Signature> functions = new LinkedHashMap<>();
-    private final Deque<Map<String, String>> scopes = new ArrayDeque<>();
+    private final Deque<Map<String, Binding>> scopes = new ArrayDeque<>();
     private final List<String> errors = new ArrayList<>();
     private final List<String> warnings = new ArrayList<>();
     /** The function being checked; null inside main. */
@@ -107,35 +139,46 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
     }
 
     private boolean isVisible(String name) {
-        for (Map<String, String> s : scopes) {
-            if (s.containsKey(name)) return true;
-        }
-        return false;
+        return binding(name) != null;
     }
 
-    private String typeOf(String name) {
-        for (Map<String, String> s : scopes) {
-            String t = s.get(name);
-            if (t != null) return t;
+    private Binding binding(String name) {
+        for (Map<String, Binding> s : scopes) {
+            Binding b = s.get(name);
+            if (b != null) return b;
         }
         return null;
     }
 
+    private String typeOf(String name) {
+        Binding b = binding(name);
+        return b == null ? null : b.type;
+    }
+
     private void define(String name, String type) {
-        if (!scopes.isEmpty()) scopes.peek().put(name, type);
+        define(name, type, false);
+    }
+
+    private void define(String name, String type, boolean constant) {
+        if (!scopes.isEmpty()) scopes.peek().put(name, new Binding(type, constant));
+    }
+
+    private void declareVariable(ParserRuleContext ctx, String name, String type, String valueType) {
+        declareVariable(ctx, name, type, valueType, false);
     }
 
     /**
      * Declares a variable. A name cannot be reused while one is visible - in
      * this scope or any enclosing one - so no variable is ever shadowed.
      */
-    private void declareVariable(ParserRuleContext ctx, String name, String type, String valueType) {
+    private void declareVariable(ParserRuleContext ctx, String name, String type,
+                                 String valueType, boolean constant) {
         if (declaredHere(name)) {
             error(ctx, "variable '" + name + "' is already declared in this scope");
         } else if (isVisible(name)) {
             error(ctx, "variable '" + name + "' is already declared in an enclosing scope");
         } else {
-            define(name, type);
+            define(name, type, constant);
         }
         if (valueType != null) checkAssignable(ctx, type, valueType, name);
     }
@@ -241,8 +284,12 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
 
     @Override
     public String visitDeclForward(VoxParser.DeclForwardContext ctx) {
+        String type = typeName(ctx.datatype());
+        if (ctx.FIXED() != null && !isList(type)) {
+            error(ctx, "'fixed' applies to lists, not " + type);
+        }
         String valueType = ctx.expression() != null ? visit(ctx.expression()) : null;
-        declareVariable(ctx, ctx.ID().getText(), typeName(ctx.datatype()), valueType);
+        declareVariable(ctx, ctx.ID().getText(), type, valueType);
         return null;
     }
 
@@ -293,6 +340,26 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         return null;
     }
 
+    /** `constant integer MAX <- 10`: assigning to MAX later is a compile error. */
+    @Override
+    public String visitDeclConstant(VoxParser.DeclConstantContext ctx) {
+        String valueType = visit(ctx.expression());
+        declareVariable(ctx, ctx.ID().getText(), typeName(ctx.datatype()), valueType, true);
+        return null;
+    }
+
+    /** `let TAX always be 0.2`: a constant with an inferred type. */
+    @Override
+    public String visitDeclConstantLet(VoxParser.DeclConstantLetContext ctx) {
+        String valueType = visit(ctx.expression());
+        if (listOf("any").equals(valueType)) {
+            error(ctx, "the type of [] cannot be inferred; declare the list with a type instead");
+        }
+        if (valueType == null || "error".equals(valueType)) valueType = "any";
+        declareVariable(ctx, ctx.ID().getText(), valueType, null, true);
+        return null;
+    }
+
     // --------------------------------------------------------- assignments --
 
     @Override
@@ -322,28 +389,39 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         checkAssignable(ctx, targetType, valueType, target.getText());
     }
 
+    private String typeOfTarget(VoxParser.TargetContext target) {
+        return typeOfTarget(target, true);
+    }
+
     /**
      * The type a target holds: a variable's declared type, or a list's item
      * type for `xs[i]` and `2nd item of xs`. Null once a problem is reported.
+     * A constant cannot be the whole target, but its items may be (the name
+     * is fixed, the list it refers to is not).
      */
-    private String typeOfTarget(VoxParser.TargetContext target) {
+    private String typeOfTarget(VoxParser.TargetContext target, boolean writing) {
         if (target instanceof VoxParser.NameTargetContext) {
             String name = ((VoxParser.NameTargetContext) target).ID().getText();
-            if (!isVisible(name)) {
+            Binding b = binding(name);
+            if (b == null) {
                 error(target, "variable '" + name + "' is not declared");
                 return null;
             }
-            return typeOf(name);
+            if (writing && b.constant) {
+                error(target, "'" + name + "' is a constant and cannot be changed");
+                return null;
+            }
+            return b.type;
         }
         if (target instanceof VoxParser.IndexTargetContext) {
             VoxParser.IndexTargetContext indexed = (VoxParser.IndexTargetContext) target;
-            String base = typeOfTarget(indexed.target());
+            String base = typeOfTarget(indexed.target(), false);
             requireIndex(indexed.expression(), visit(indexed.expression()));
             return itemTypeOf(indexed, base);
         }
         VoxParser.OrdinalTargetContext ordinal = (VoxParser.OrdinalTargetContext) target;
         checkOrdinal(ordinal, ordinal.ORDINAL());
-        return itemTypeOf(ordinal, typeOfTarget(ordinal.target()));
+        return itemTypeOf(ordinal, typeOfTarget(ordinal.target(), false));
     }
 
     /** The item type of a list type; reports when the base is not a list. */
@@ -554,6 +632,26 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
             requireIndex(ctx.expression(1), visit(ctx.expression(1)));
         }
         return popResult(ctx, listType);
+    }
+
+    /** `lock xs;`, `sort the scores;` - a one-list verb, checked as its builtin. */
+    @Override
+    public String visitListStatement(VoxParser.ListStatementContext ctx) {
+        List<String> argTypes = new ArrayList<>();
+        argTypes.add(visit(ctx.expression()));
+        checkBuiltin(ctx, ctx.verb.getText(), argTypes);
+        return null;
+    }
+
+    /** `position of x in xs` is position(xs, x). */
+    @Override
+    public String visitPositionExpr(VoxParser.PositionExprContext ctx) {
+        String valueType = visit(ctx.expression(0));
+        String listType = visit(ctx.expression(1));
+        List<String> argTypes = new ArrayList<>();
+        argTypes.add(listType);
+        argTypes.add(valueType);
+        return checkBuiltin(ctx, "position", argTypes);
     }
 
     private String popResult(ParserRuleContext ctx, String listType) {
@@ -795,7 +893,8 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         if (e instanceof VoxParser.EqExprContext) {
             warn(e, "comparison has no effect; to assign, use 'set ... to', '<-' or '='");
         } else if (!(e instanceof VoxParser.CallExprContext) && !(e instanceof VoxParser.InputExprContext)
-                && !(e instanceof VoxParser.PopExprContext) && !(e instanceof VoxParser.PopCallContext)) {
+                && !(e instanceof VoxParser.PopExprContext) && !(e instanceof VoxParser.PopCallContext)
+                && !(e instanceof VoxParser.MethodCallContext)) {
             warn(e, "expression has no effect");
         }
         return null;
@@ -915,6 +1014,8 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
             boolean ok;
             if (pred == VoxParser.EMPTY) {
                 ok = "string".equals(t) || "character".equals(t) || isList(t);
+            } else if (pred == VoxParser.LOCKED || pred == VoxParser.WRAPPING) {
+                ok = isList(t);
             } else if (pred == VoxParser.EVEN || pred == VoxParser.ODD) {
                 ok = "integer".equals(t);
             } else {
@@ -1033,10 +1134,33 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
 
     @Override
     public String visitFunctionCall(VoxParser.FunctionCallContext ctx) {
-        String name = ctx.ID().getText();
+        List<VoxParser.ExpressionContext> args = ctx.expression();
         List<String> argTypes = new ArrayList<>();
-        for (VoxParser.ExpressionContext e : ctx.expression()) argTypes.add(visit(e));
+        for (VoxParser.ExpressionContext e : args) argTypes.add(visit(e));
+        return checkCall(ctx, ctx.ID().getText(), args, argTypes);
+    }
 
+    /** `a.f(b)` is `f(a, b)`: the receiver is checked as the first argument. */
+    @Override
+    public String visitMethodCall(VoxParser.MethodCallContext ctx) {
+        String name = ctx.methodName().getText();
+        List<VoxParser.ExpressionContext> args = ctx.expression();
+        List<String> argTypes = new ArrayList<>();
+        for (VoxParser.ExpressionContext e : args) argTypes.add(visit(e));
+        String t = checkCall(ctx, name, args, argTypes);
+        if ("void".equals(t) && !(ctx.getParent() instanceof VoxParser.ExprStmtContext)) {
+            error(ctx, "procedure '" + name + "' returns nothing and cannot be used as a value");
+            return "error";
+        }
+        return t;
+    }
+
+    /** A call by name, however it was spelled: user function, builtin or list operation. */
+    private String checkCall(ParserRuleContext ctx, String name,
+                             List<VoxParser.ExpressionContext> args, List<String> argTypes) {
+        if (name.equals("push") || name.equals("insert") || name.equals("pop")) {
+            return checkListCall(ctx, name, args, argTypes);
+        }
         Signature sig = functions.get(name);
         if (sig == null) {
             if (BUILTINS.containsKey(name)) return checkBuiltin(ctx, name, argTypes);
@@ -1066,13 +1190,39 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
         return sig.returnType;
     }
 
+    /** push(xs, v), insert(xs, i, v), pop(xs), pop(xs, i) - reached through a dot. */
+    private String checkListCall(ParserRuleContext ctx, String name,
+                                 List<VoxParser.ExpressionContext> args, List<String> argTypes) {
+        int min = name.equals("push") ? 2 : name.equals("insert") ? 3 : 1;
+        int max = name.equals("push") ? 2 : name.equals("insert") ? 3 : 2;
+        if (argTypes.size() < min || argTypes.size() > max) {
+            String want = min == max ? String.valueOf(min) : min + " or " + max;
+            error(ctx, "function '" + name + "' expects " + want + " argument(s) but got " + argTypes.size());
+            return name.equals("pop") ? "error" : "void";
+        }
+        switch (name) {
+            case "push":
+                checkListOp(ctx, "push", argTypes.get(0), argTypes.get(1));
+                return "void";
+            case "insert":
+                requireIndex(args.get(1), argTypes.get(1));
+                checkListOp(ctx, "insert", argTypes.get(0), argTypes.get(2));
+                return "void";
+            default:
+                if (argTypes.size() == 2) requireIndex(args.get(1), argTypes.get(1));
+                return popResult(ctx, argTypes.get(0));
+        }
+    }
+
     /** Arity and type checks for a builtin; returns its result type. */
     private String checkBuiltin(ParserRuleContext ctx, String name, List<String> argTypes) {
         BuiltinSpec spec = BUILTINS.get(name);
+        String first = argTypes.isEmpty() ? null : argTypes.get(0);
         String result = spec.result;
         if ("same".equals(result)) {
-            String t = argTypes.isEmpty() ? null : argTypes.get(0);
-            result = (t == null || "error".equals(t)) ? "any" : t;
+            result = (first == null || "error".equals(first)) ? "any" : first;
+        } else if ("element".equals(result)) {
+            result = (first != null && isList(first)) ? elementOf(first) : "any";
         } else if ("numeric".equals(result)) {
             result = "integer";
             if (argTypes.contains("float")) result = "float";
@@ -1093,8 +1243,23 @@ public class SemanticAnalyzer extends VoxBaseVisitor<String> {
                 case "num":    ok = isNumeric(got); want = "a number"; break;
                 case "string": ok = "string".equals(got) || "character".equals(got); want = "string"; break;
                 case "list":   ok = isList(got); want = "a list"; break;
-                default:       ok = "string".equals(got) || "character".equals(got) || isList(got);
+                case "sized":  ok = "string".equals(got) || "character".equals(got) || isList(got);
                                want = "a string or a list"; break;
+                case "sortable":
+                    ok = isList(got) && !isList(elementOf(got));
+                    want = "a list of numbers or strings";
+                    break;
+                case "numlist": {
+                    String element = isList(got) ? elementOf(got) : "";
+                    ok = isList(got) && (isNumeric(element) || "any".equals(element));
+                    want = "a list of numbers";
+                    break;
+                }
+                default: { // item: must fit the first argument's item type
+                    String element = (first != null && isList(first)) ? elementOf(first) : "any";
+                    ok = !"no".equals(fits(element, got));
+                    want = element;
+                }
             }
             if (!ok) {
                 error(ctx, "argument " + (i + 1) + " of '" + name + "' expects " + want + " but got " + got);

@@ -20,6 +20,7 @@ statement
     | assignment ';'            # assignStmt
     | updateStatement ';'       # updateStmt
     | pushStatement ';'         # pushStmt
+    | listStatement ';'         # listStmt
     | ifStatement               # ifStmt
     | whileLoop                 # whileStmt
     | forLoop                   # forStmt
@@ -65,14 +66,18 @@ forEachLoop    : FOR_EACH datatype? ID IN expression block
                | FOR '(' datatype ID ':' expression ')' block
                ;
 
+// `fixed` declares a list that is born locked (an array, in C terms).
+// `constant` declares a name that can never be assigned again.
 variableDeclaration
-    : DECL_START? datatype ID (ASSIGN expression)?                                 # declForward
-    | expression RASSIGN datatype ID                                               # declReverse
-    | LET ID BE expression                                                         # declLet
+    : DECL_START? FIXED? datatype ID (ASSIGN expression)?                                 # declForward
+    | expression RASSIGN datatype ID                                                      # declReverse
+    | LET ID BE expression                                                                # declLet
     // `integer xs[5]` is five defaults, `integer xs[]` is empty. The bracket
     // after the name adds one list dimension, as in C.
-    | DECL_START? datatype ID '[' size=expression? ']' (ASSIGN init=expression)?  # declSized
-    | ID IS_A_LIST_OF datatype (ASSIGN init=expression)?                           # declListIs
+    | DECL_START? FIXED? datatype ID '[' size=expression? ']' (ASSIGN init=expression)?  # declSized
+    | ID IS_A_LIST_OF datatype (ASSIGN init=expression)?                                  # declListIs
+    | CONSTANT datatype ID ASSIGN expression                                              # declConstant
+    | LET ID ALWAYS BE expression                                                         # declConstantLet
     ;
 
 assignment
@@ -127,6 +132,11 @@ pushStatement
     | INSERT '(' expression ',' expression ',' expression ')'  # insertCall
     ;
 
+// One-list verbs: `lock xs;`, `sort the scores;`. `lock(xs)` is the same
+// statement with a parenthesised operand, and `xs.lock()` is the dot form.
+listStatement
+    : verb=(LOCK | UNLOCK | WRAP | UNWRAP | SORT | REVERSE) THE? expression ;
+
 printStatement  : PRINT '(' expression (',' expression)* ')'
                 | SAY expression (',' expression)*
                 ;
@@ -140,10 +150,14 @@ functionCall    : ID '(' (expression (',' expression)*)? ')' ;
 // -(x squared).
 expression
     : '(' expression ')'                          # parenExpr
+    // `a.f(b)` means `f(a, b)`: the receiver is the first argument. This is
+    // how `xs.push(5)`, `s.length()` and a user's own `n.twice()` all work.
+    | expression '.' methodName '(' (expression (',' expression)*)? ')'   # methodCall
     | expression '[' expression ']'               # indexExpr
     | expression AS datatype                      # castExpr
     | expression op=(SQUARED | CUBED)             # squaredExpr
     | builtinName expression                      # builtinExpr
+    | POSITION_OF expression IN expression        # positionExpr
     | ORDINAL ITEM_OF expression                  # ordinalExpr
     | POP '(' expression (',' expression)? ')'    # popCall
     | POP expression (AT expression)?             # popExpr
@@ -155,7 +169,7 @@ expression
     | expression op=(ADD|SUB) expression          # addExpr
     | expression SUBFROM expression               # subFromExpr
     // Predicates reuse `is` (EQ) and `is not` (NE), so negation comes free.
-    | expression op=(EQ|NE) pred=(EVEN | ODD | POSITIVE | NEGATIVE | EMPTY)   # predicateExpr
+    | expression op=(EQ|NE) pred=(EVEN | ODD | POSITIVE | NEGATIVE | EMPTY | LOCKED | WRAPPING)   # predicateExpr
     | expression op=(EQ|NE) DIVISIBLE BY expression                           # divisibleExpr
     | expression op=(EQ|NE) BETWEEN low=expression AND high=expression        # betweenExpr
     | expression op=(EQ|NE) IN expression                                     # inExpr
@@ -177,7 +191,12 @@ expression
 // Spoken forms of the builtin functions. The symbolic forms (sqrt(x), abs(x),
 // round(x), floor(x), ceiling(x), min(a, b), max(a, b), length(s),
 // uppercase(s), lowercase(s)) are ordinary calls resolved by name.
-builtinName : SQRT_OF | ABS_OF | LENGTH_OF | FLOOR_OF | CEIL_OF | UPPER_OF | LOWER_OF | COPY_OF ;
+builtinName : SQRT_OF | ABS_OF | LENGTH_OF | FLOOR_OF | CEIL_OF | UPPER_OF | LOWER_OF | COPY_OF
+            | SUM_OF | LARGEST_OF | SMALLEST_OF ;
+
+// What may follow a dot. The list verbs are keywords, so they are listed.
+methodName  : ID | PUSH | INSERT | POP | LOCK | UNLOCK | WRAP | UNWRAP | SORT | REVERSE
+            | LOCKED | WRAPPING ;
 
 // `list<integer>`, `list of integers` and `integer[]` are the same type, and
 // they nest: `integer[][]` is a list of lists.
@@ -251,6 +270,23 @@ INSERT       : 'insert' ;
 INTO         : 'into' ;
 POP          : 'pop' ;
 CONTAINS     : 'contains' ;
+
+// Locks, wrapping, ordering and constants.
+LOCK        : 'lock' ;
+UNLOCK      : 'unlock' ;
+WRAP        : 'wrap' ;
+UNWRAP      : 'unwrap' ;
+LOCKED      : 'locked' ;
+WRAPPING    : 'wrapping' ;
+SORT        : 'sort' ;
+REVERSE     : 'reverse' ;
+FIXED       : 'fixed' ;
+CONSTANT    : 'constant' ;
+ALWAYS      : 'always' ;
+SUM_OF      : 'sum' S 'of' ;
+LARGEST_OF  : 'largest' S 'of' ;
+SMALLEST_OF : 'smallest' S 'of' ;
+POSITION_OF : 'position' S 'of' ;
 
 // In-place updates: symbolic ...
 INC        : '++' ;

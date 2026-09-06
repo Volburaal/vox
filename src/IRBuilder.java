@@ -108,6 +108,7 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         } else {
             emitDefault(name, SemanticAnalyzer.typeName(ctx.datatype()));
         }
+        if (ctx.FIXED() != null) emit("builtin " + newTemp() + " lock " + name);
         return null;
     }
 
@@ -135,6 +136,7 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         } else {
             emit("list " + name);
         }
+        if (ctx.FIXED() != null) emit("builtin " + newTemp() + " lock " + name);
         return null;
     }
 
@@ -143,6 +145,19 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         String name = ctx.ID().getText();
         if (ctx.init != null) emit("set " + name + " " + visit(ctx.init));
         else emit("list " + name);
+        return null;
+    }
+
+    // Constants are ordinary variables at run time; the checker guards them.
+    @Override
+    public String visitDeclConstant(VoxParser.DeclConstantContext ctx) {
+        emit("set " + ctx.ID().getText() + " " + visit(ctx.expression()));
+        return null;
+    }
+
+    @Override
+    public String visitDeclConstantLet(VoxParser.DeclConstantLetContext ctx) {
+        emit("set " + ctx.ID().getText() + " " + visit(ctx.expression()));
         return null;
     }
 
@@ -379,6 +394,24 @@ public class IRBuilder extends VoxBaseVisitor<String> {
         String index = ctx.expression().size() > 1 ? " " + visit(ctx.expression(1)) : "";
         String dest = newTemp();
         emit("list_pop " + dest + " " + list + index);
+        return dest;
+    }
+
+    /** `lock xs;`, `sort the scores;` - the verb is a builtin with one operand. */
+    @Override
+    public String visitListStatement(VoxParser.ListStatementContext ctx) {
+        String list = visit(ctx.expression());
+        emit("builtin " + newTemp() + " " + ctx.verb.getText() + " " + list);
+        return null;
+    }
+
+    /** `position of x in xs` is position(xs, x): the operands swap places. */
+    @Override
+    public String visitPositionExpr(VoxParser.PositionExprContext ctx) {
+        String value = visit(ctx.expression(0));
+        String list = visit(ctx.expression(1));
+        String dest = newTemp();
+        emit("builtin " + dest + " position " + list + " " + value);
         return dest;
     }
 
@@ -760,6 +793,14 @@ public class IRBuilder extends VoxBaseVisitor<String> {
             emit((negated ? "ne" : "eq") + " " + dest + " " + length + " 0");
             return dest;
         }
+        if (pred == VoxParser.LOCKED || pred == VoxParser.WRAPPING) {
+            String flag = newTemp();
+            emit("builtin " + flag + " " + (pred == VoxParser.LOCKED ? "locked" : "wrapping") + " " + value);
+            if (!negated) return flag;
+            String inverted = newTemp();
+            emit("not " + inverted + " " + flag);
+            return inverted;
+        }
         String dest = newTemp();
         if (pred == VoxParser.POSITIVE) {
             emit((negated ? "le" : "gt") + " " + dest + " " + value + " 0");
@@ -841,22 +882,38 @@ public class IRBuilder extends VoxBaseVisitor<String> {
 
     @Override
     public String visitFunctionCall(VoxParser.FunctionCallContext ctx) {
-        String name = ctx.ID().getText();
         List<String> args = new ArrayList<>();
         for (VoxParser.ExpressionContext e : ctx.expression()) args.add(visit(e));
-        String dest = newTemp();
+        return emitCall(ctx.ID().getText(), args);
+    }
 
-        if (!userFunctions.contains(name) && SemanticAnalyzer.BUILTINS.containsKey(name)) {
+    /** `a.f(b)` is `f(a, b)`: the receiver simply becomes the first operand. */
+    @Override
+    public String visitMethodCall(VoxParser.MethodCallContext ctx) {
+        List<String> args = new ArrayList<>();
+        for (VoxParser.ExpressionContext e : ctx.expression()) args.add(visit(e));
+        return emitCall(ctx.methodName().getText(), args);
+    }
+
+    /** A call by name: a list operation, a builtin, or the user's own function. */
+    private String emitCall(String name, List<String> args) {
+        String dest = newTemp();
+        if (name.equals("push")) {
+            emit("list_push " + args.get(0) + " " + args.get(1));
+        } else if (name.equals("insert")) {
+            emit("list_insert " + args.get(0) + " " + args.get(1) + " " + args.get(2));
+        } else if (name.equals("pop")) {
+            emit("list_pop " + dest + " " + args.get(0) + (args.size() > 1 ? " " + args.get(1) : ""));
+        } else if (!userFunctions.contains(name) && SemanticAnalyzer.BUILTINS.containsKey(name)) {
             StringBuilder sb = new StringBuilder("builtin ").append(dest).append(' ').append(name);
             for (String a : args) sb.append(' ').append(a);
             emit(sb.toString());
-            return dest;
+        } else {
+            StringBuilder sb = new StringBuilder("call ").append(name);
+            for (String a : args) sb.append(' ').append(a);
+            sb.append(" -> ").append(dest);
+            emit(sb.toString());
         }
-
-        StringBuilder sb = new StringBuilder("call ").append(name);
-        for (String a : args) sb.append(' ').append(a);
-        sb.append(" -> ").append(dest);
-        emit(sb.toString());
         return dest;
     }
 

@@ -76,6 +76,18 @@ public class IRExecutor {
     };
     private long stepLimit = DEFAULT_STEP_LIMIT;
 
+    /**
+     * A list, with the two switches a program can flip on it: `lock` freezes
+     * its size (items stay writable), `wrap` makes indexes count around the
+     * ends. Lists are references: every frame holding one sees changes.
+     */
+    static final class VoxList {
+        final List<Object> items;
+        boolean locked = false;
+        boolean wrapping = false;
+        VoxList(List<Object> items) { this.items = items; }
+    }
+
     /** One activation record. Locals are private to this frame. */
     private static final class Frame {
         final int returnPc;
@@ -236,7 +248,7 @@ public class IRExecutor {
                     require(toks, 2, raw);
                     List<Object> items = new ArrayList<>();
                     for (int i = 2; i < toks.length; i++) items.add(resolve(toks[i]));
-                    frame().locals.put(toks[1], items);
+                    frame().locals.put(toks[1], new VoxList(items));
                     pc++;
                     break;
                 }
@@ -251,63 +263,67 @@ public class IRExecutor {
                     if (n < 0) throw new VoxRuntimeError("cannot make a list of " + n + " items");
                     List<Object> items = new ArrayList<>();
                     for (int i = 0; i < n; i++) items.add(defaultValue(toks[3]));
-                    frame().locals.put(toks[1], items);
+                    frame().locals.put(toks[1], new VoxList(items));
                     pc++;
                     break;
                 }
 
                 case "list_get": {
                     require(toks, 4, raw);
-                    List<Object> list = asList(resolve(toks[2]));
-                    int i = checkIndex(resolve(toks[3]), list.size(), false);
-                    frame().locals.put(toks[1], list.get(i));
+                    VoxList list = asList(resolve(toks[2]));
+                    int i = checkIndex(resolve(toks[3]), list, false);
+                    frame().locals.put(toks[1], list.items.get(i));
                     pc++;
                     break;
                 }
 
                 case "list_set": {
                     require(toks, 4, raw);
-                    List<Object> list = asList(resolve(toks[1]));
-                    int i = checkIndex(resolve(toks[2]), list.size(), false);
-                    list.set(i, resolve(toks[3]));
+                    VoxList list = asList(resolve(toks[1]));
+                    int i = checkIndex(resolve(toks[2]), list, false);
+                    list.items.set(i, resolve(toks[3]));
                     pc++;
                     break;
                 }
 
                 case "list_push": {
                     require(toks, 3, raw);
-                    asList(resolve(toks[1])).add(resolve(toks[2]));
+                    VoxList list = asList(resolve(toks[1]));
+                    if (list.locked) throw new VoxRuntimeError("cannot push to a locked list");
+                    list.items.add(resolve(toks[2]));
                     pc++;
                     break;
                 }
 
                 case "list_insert": {
                     require(toks, 4, raw);
-                    List<Object> list = asList(resolve(toks[1]));
-                    int i = checkIndex(resolve(toks[2]), list.size(), true);
-                    list.add(i, resolve(toks[3]));
+                    VoxList list = asList(resolve(toks[1]));
+                    if (list.locked) throw new VoxRuntimeError("cannot insert into a locked list");
+                    int i = checkIndex(resolve(toks[2]), list, true);
+                    list.items.add(i, resolve(toks[3]));
                     pc++;
                     break;
                 }
 
                 case "list_pop": {
                     require(toks, 3, raw);
-                    List<Object> list = asList(resolve(toks[2]));
-                    if (list.isEmpty()) throw new VoxRuntimeError("cannot pop from an empty list");
+                    VoxList list = asList(resolve(toks[2]));
+                    if (list.locked) throw new VoxRuntimeError("cannot pop from a locked list");
+                    if (list.items.isEmpty()) throw new VoxRuntimeError("cannot pop from an empty list");
                     int i = toks.length >= 4
-                            ? checkIndex(resolve(toks[3]), list.size(), false)
-                            : list.size() - 1;
-                    frame().locals.put(toks[1], list.remove(i));
+                            ? checkIndex(resolve(toks[3]), list, false)
+                            : list.items.size() - 1;
+                    frame().locals.put(toks[1], list.items.remove(i));
                     pc++;
                     break;
                 }
 
                 case "list_has": {
                     require(toks, 4, raw);
-                    List<Object> list = asList(resolve(toks[2]));
+                    VoxList list = asList(resolve(toks[2]));
                     Object wanted = resolve(toks[3]);
                     boolean found = false;
-                    for (Object item : list) {
+                    for (Object item : list.items) {
                         if (equal(item, wanted)) { found = true; break; }
                     }
                     frame().locals.put(toks[1], found);
@@ -464,10 +480,10 @@ public class IRExecutor {
 
     private static String display(Object o) {
         if (o == null) return "null";
-        if (o instanceof List) {
+        if (o instanceof VoxList) {
             StringBuilder sb = new StringBuilder("[");
             boolean first = true;
-            for (Object item : (List<?>) o) {
+            for (Object item : ((VoxList) o).items) {
                 if (!first) sb.append(", ");
                 first = false;
                 sb.append(item instanceof String ? quote((String) item) : display(item));
@@ -488,7 +504,7 @@ public class IRExecutor {
         if (o instanceof Integer) return (Integer) o != 0;
         if (o instanceof Double)  return (Double) o != 0.0;
         if (o instanceof String)  return !((String) o).isEmpty();
-        if (o instanceof List)    return !((List<?>) o).isEmpty();
+        if (o instanceof VoxList) return !((VoxList) o).items.isEmpty();
         return true;
     }
 
@@ -501,27 +517,31 @@ public class IRExecutor {
             case "string":
             case "character": return "";
             default:
-                if (irType.startsWith("list<")) return new ArrayList<Object>();
+                if (irType.startsWith("list<")) return new VoxList(new ArrayList<>());
                 throw new VoxRuntimeError("unknown type: " + irType);
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private static List<Object> asList(Object v) {
-        if (v instanceof List) return (List<Object>) v;
+    private static VoxList asList(Object v) {
+        if (v instanceof VoxList) return (VoxList) v;
         throw new VoxRuntimeError("cannot use " + describe(v) + " as a list");
     }
 
     /**
      * Validates a list index: an integer from 0 to length - 1 (or to length
-     * when inserting, so an item can go at the end). No negative or wrapping
-     * indexes.
+     * when inserting, so an item can go at the end). A wrapping list counts
+     * around its ends instead - `-1` is the last item - except for insert
+     * positions, where wrapping the end to the front would misplace items.
      */
-    private static int checkIndex(Object index, int length, boolean allowEnd) {
+    private static int checkIndex(Object index, VoxList list, boolean allowEnd) {
         if (!(index instanceof Integer)) {
             throw new VoxRuntimeError("index must be an integer but got " + describe(index));
         }
         int i = (Integer) index;
+        int length = list.items.size();
+        if (list.wrapping && !allowEnd && length > 0) {
+            return ((i % length) + length) % length;
+        }
         int limit = allowEnd ? length : length - 1;
         if (i < 0 || i > limit) {
             throw new VoxRuntimeError("index " + i + " is out of range for a list of " + length);
@@ -533,8 +553,8 @@ public class IRExecutor {
     private static boolean equal(Object left, Object right) {
         if (left == null || right == null) return left == null && right == null;
         if (isNumber(left) && isNumber(right)) return toDouble(left) == toDouble(right);
-        if (left instanceof List && right instanceof List) {
-            List<?> a = (List<?>) left, b = (List<?>) right;
+        if (left instanceof VoxList && right instanceof VoxList) {
+            List<?> a = ((VoxList) left).items, b = ((VoxList) right).items;
             if (a.size() != b.size()) return false;
             for (int i = 0; i < a.size(); i++) {
                 if (!equal(a.get(i), b.get(i))) return false;
@@ -608,17 +628,7 @@ public class IRExecutor {
             throw new VoxRuntimeError("cannot order-compare with an unset value using '" + op + "'");
         }
 
-        int c;
-        if (isNumber(left) && isNumber(right)) {
-            c = Double.compare(toDouble(left), toDouble(right));
-        } else if (left instanceof String && right instanceof String) {
-            c = ((String) left).compareTo((String) right);
-        } else if (left instanceof Boolean && right instanceof Boolean) {
-            c = Boolean.compare((Boolean) left, (Boolean) right);
-        } else {
-            throw new VoxRuntimeError("cannot compare " + describe(left) + " with " + describe(right));
-        }
-
+        int c = order(left, right);
         switch (op) {
             case "lt": return c < 0;
             case "gt": return c > 0;
@@ -626,6 +636,14 @@ public class IRExecutor {
             case "ge": return c >= 0;
             default: throw new VoxRuntimeError("unknown comparison op: " + op);
         }
+    }
+
+    /** Ordering for numbers, strings and booleans; anything else cannot be ordered. */
+    private static int order(Object left, Object right) {
+        if (isNumber(left) && isNumber(right)) return Double.compare(toDouble(left), toDouble(right));
+        if (left instanceof String && right instanceof String) return ((String) left).compareTo((String) right);
+        if (left instanceof Boolean && right instanceof Boolean) return Boolean.compare((Boolean) left, (Boolean) right);
+        throw new VoxRuntimeError("cannot compare " + describe(left) + " with " + describe(right));
     }
 
     /** Explicit conversion, `x as integer`. Fails loudly instead of guessing. */
@@ -701,13 +719,62 @@ public class IRExecutor {
             case "length": {
                 arity(name, args, 1);
                 Object v = args.get(0);
-                if (v instanceof List) return ((List<?>) v).size();
+                if (v instanceof VoxList) return ((VoxList) v).items.size();
                 if (v instanceof String) return ((String) v).length();
                 throw new VoxRuntimeError("'length' needs a string or a list but got " + describe(v));
             }
             case "uppercase": arity(name, args, 1); return str(name, args.get(0)).toUpperCase(Locale.ROOT);
             case "lowercase": arity(name, args, 1); return str(name, args.get(0)).toLowerCase(Locale.ROOT);
-            case "copy":      arity(name, args, 1); return new ArrayList<>(list(name, args.get(0))); // one level deep
+            case "copy":      arity(name, args, 1); return new VoxList(new ArrayList<>(list(name, args.get(0)).items)); // one level deep
+
+            // ---- list switches ------------------------------------------------
+            case "lock":     arity(name, args, 1); list(name, args.get(0)).locked = true; return null;
+            case "unlock":   arity(name, args, 1); list(name, args.get(0)).locked = false; return null;
+            case "wrap":     arity(name, args, 1); list(name, args.get(0)).wrapping = true; return null;
+            case "unwrap":   arity(name, args, 1); list(name, args.get(0)).wrapping = false; return null;
+            case "locked":   arity(name, args, 1); return list(name, args.get(0)).locked;
+            case "wrapping": arity(name, args, 1); return list(name, args.get(0)).wrapping;
+
+            // ---- ordering and aggregates ---------------------------------------
+            case "sort": {
+                arity(name, args, 1);
+                VoxList l = list(name, args.get(0));
+                for (Object item : l.items) {
+                    if (item instanceof VoxList) throw new VoxRuntimeError("cannot sort a list of lists");
+                }
+                l.items.sort(IRExecutor::order); // stable; mixed types fail inside order()
+                return null;
+            }
+            case "reverse":  arity(name, args, 1); Collections.reverse(list(name, args.get(0)).items); return null;
+            case "sum": {
+                arity(name, args, 1);
+                Object total = 0;
+                for (Object v : list(name, args.get(0)).items) {
+                    if (!isNumber(v)) throw new VoxRuntimeError("'sum' needs a list of numbers but got " + describe(v));
+                    total = arithmetic("add", total, v);
+                }
+                return total;
+            }
+            case "largest":
+            case "smallest": {
+                arity(name, args, 1);
+                List<Object> items = list(name, args.get(0)).items;
+                if (items.isEmpty()) throw new VoxRuntimeError(name + " of an empty list");
+                Object best = items.get(0);
+                for (Object v : items) {
+                    int c = order(v, best);
+                    if (name.equals("largest") ? c > 0 : c < 0) best = v;
+                }
+                return best;
+            }
+            case "position": {
+                arity(name, args, 2);
+                List<Object> items = list(name, args.get(0)).items;
+                for (int i = 0; i < items.size(); i++) {
+                    if (equal(items.get(i), args.get(1))) return i;
+                }
+                return -1;
+            }
             default:
                 throw new VoxRuntimeError("unknown builtin: " + name);
         }
@@ -730,10 +797,9 @@ public class IRExecutor {
         return (String) v;
     }
 
-    @SuppressWarnings("unchecked")
-    private static List<Object> list(String name, Object v) {
-        if (!(v instanceof List)) throw new VoxRuntimeError("'" + name + "' needs a list but got " + describe(v));
-        return (List<Object>) v;
+    private static VoxList list(String name, Object v) {
+        if (!(v instanceof VoxList)) throw new VoxRuntimeError("'" + name + "' needs a list but got " + describe(v));
+        return (VoxList) v;
     }
 
     private static String describe(Object o) {
@@ -741,7 +807,7 @@ public class IRExecutor {
         if (o instanceof Integer) return "integer " + o;
         if (o instanceof Double)  return "float " + o;
         if (o instanceof Boolean) return "boolean " + o;
-        if (o instanceof List)    return "list " + display(o);
+        if (o instanceof VoxList) return "list " + display(o);
         return "string \"" + o + "\"";
     }
 }
