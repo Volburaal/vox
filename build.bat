@@ -1,5 +1,5 @@
 @echo off
-REM Builds Vox: generates the parser from Vox.g4, compiles everything and
+REM Builds Vox: generates the parser from Vox.g4, compiles everything
 REM packages a self-contained runnable jar at build\vox.jar.
 
 setlocal

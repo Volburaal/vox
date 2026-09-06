@@ -20,6 +20,8 @@
 - The voice forms: `say`, `ask`, `set ... to`, `let ... be`, `swap ... and ...`
 - `print` writes raw text - `'\n'` ends a line; `say` always ends the line
 - Lists: `integer[] xs`, `list<integer>` or `xs is a list of integers`; `xs[i]` and `2nd item of xs`; `push`, `pop`, `insert`; `for each x in xs`
+- Dot calls: `a.f(b)` means `f(a, b)`, so `xs.push(5)`, `s.length()` and your own `n.twice()` all work
+- `lock`/`unlock` a list's size, `wrap`/`unwrap` its indexes, `fixed` arrays, `constant` names; `sort`, `reverse`, `sum of`, `largest of`, `position of`
 - Functions, procedures, forward declarations and recursion
 - `main { }` may also be spelled `program { }` or `code { }`
 - Input/Output operations
@@ -241,7 +243,7 @@ main {
 | Level | Operators                                                                                                              |
 | ----- | ---------------------------------------------------------------------------------------------------------------------- |
 | 1     | `( )`                                                                                                                  |
-| 2     | `xs[i]` (an item of a list)                                                                                            |
+| 2     | `xs[i]` (an item of a list), `a.f(b)` (a dot call)                                                                     |
 | 3     | `as` (cast)                                                                                                            |
 | 4     | `squared`, `cubed`                                                                                                     |
 | 5     | spoken builtins (`square root of`, `length of`, ...), `Nth item of`, `pop`, `ask`                                      |
@@ -431,7 +433,8 @@ an update as its third clause: `for (integer i <- 1; i <= 5; i++)`.
 The verbs, the range-loop words, the voice words and the list words (`add`,
 `double`, `to`, `from`, `by`, `the`, `step`, `until`, `say`, `ask`, `set`,
 `let`, `be`, `swap`, `repeat`, `even`, `odd`, `list`, `in`, `at`, `push`,
-`pop`, `insert`, `into`, `contains`, ...) are keywords, so they cannot name a
+`pop`, `insert`, `into`, `contains`, `lock`, `wrap`, `sort`, `reverse`,
+`fixed`, `constant`, `always`, ...) are keywords, so they cannot name a
 variable or a function.
 
 ### Range loops
@@ -479,6 +482,42 @@ anything else - including a negative index - is a runtime error, as is popping
 an empty list. Ordinals are checked: `2th item` is a compile error that tells
 you to write `2nd`. Inside `for each` the length is re-read every turn, so
 pushing to the list extends the loop.
+
+`sort xs;` and `reverse xs;` change a list in place; `sum of xs`, `largest of
+xs`, `smallest of xs` and `position of x in xs` (`-1` when absent) read it.
+Each also has a function form and a dot form: `sum(xs)`, `xs.sum()`.
+
+### Dot calls
+
+`a.f(b)` means exactly `f(a, b)`: the thing before the dot becomes the first
+argument. That one rule gives every list operation and builtin a method
+spelling, and your own functions too:
+
+```java
+xs.push(5);                    // push(xs, 5)
+say s.length(), " ", xs.sum(); // length(s), sum(xs)
+say 21.twice();                // your own integer twice(integer n)
+say xs.copy().pop();           // calls chain left to right
+```
+
+Parentheses are always required. The spoken forms and the plain function
+forms remain; all three compile to the same instruction.
+
+### Locks, wrapping and constants
+
+`lock xs;` freezes a list's size: `push`, `insert` and `pop` are runtime errors
+until `unlock xs;`. Items stay writable. The lock belongs to the list, so every
+alias sees it. `fixed integer xs[5];` declares a list that is born locked, and
+`xs is locked` asks.
+
+`wrap xs;` makes indexes count around the ends: `xs[-1]` is the last item,
+`xs[length]` is the first again, and ordinals follow (`5th item of` a 3-list is
+the 2nd). It applies to reads, writes, `pop at` and ordinals, never to
+`insert at`. `unwrap xs;` restores the strict rule; `xs is wrapping` asks.
+
+`constant integer MAX <- 3;` and `let NAME always be value;` declare names that
+cannot be assigned again - a compile error, not a runtime one. A constant list
+is a constant *name*; the list it refers to may still change.
 
 ### Powers
 

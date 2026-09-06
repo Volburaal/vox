@@ -29,6 +29,7 @@ const OPERATOR_PHRASES = [
 const BUILTIN_PHRASES = [
   'absolute value of', 'square root of', 'uppercase of', 'lowercase of',
   'ceiling of', 'length of', 'floor of', 'copy of',
+  'smallest of', 'position of', 'largest of', 'sum of',
 ];
 
 export const PHRASES = [
@@ -50,6 +51,9 @@ export const KEYWORDS = new Set([
   'even', 'odd', 'positive', 'negative', 'empty', 'divisible', 'between',
   // lists
   'list', 'in', 'at', 'push', 'insert', 'into', 'pop', 'contains',
+  'lock', 'unlock', 'wrap', 'unwrap', 'locked', 'wrapping', 'sort', 'reverse', 'fixed',
+  // constants
+  'constant', 'always',
 ]);
 export const TYPES = new Set([
   'int', 'integer', 'integers', 'number', 'numbers', 'float', 'floats',
@@ -107,7 +111,7 @@ export const voxLanguage = StreamLanguage.define<State>({
     }
 
     if (stream.match(SYMBOL_RE)) return 'operator';
-    if (stream.match(/^[(){}[\];,:]/)) return 'punctuation';
+    if (stream.match(/^[(){}[\];,:.]/)) return 'punctuation';
 
     const ident = stream.match(IDENT_RE) as RegExpMatchArray | null;
     if (ident) {
