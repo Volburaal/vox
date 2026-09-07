@@ -1,21 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FromWorker, ToWorker } from "./protocol";
+import {
+  splitOutput,
+  withLines,
+  withoutPartial,
+  type ConsoleLine,
+  type LineKind,
+} from "./consoleLines";
 
-export type LineKind = "out" | "err" | "warn" | "info" | "in";
-export interface ConsoleLine {
-  id: number;
-  kind: LineKind;
-  text: string;
-}
+export type { ConsoleLine, LineKind };
 
 export type RunnerStatus = "idle" | "running" | "waiting" | "done" | "error";
-
-/** Keep the console usable if a program prints without end. */
-const MAX_LINES = 5000;
 
 /**
  * Owns the worker that runs Vox programs and exposes its state to React.
  * Each run gets a fresh worker; stopping is simply terminating it.
+ *
+ * Every decision about the console - ids, which lines are finished, whether
+ * the trailing partial line is being replaced - is made here, synchronously,
+ * before setLines is called. The updaters passed to setLines are pure
+ * functions of the previous state: React may run them later than the call
+ * (after the next worker message has arrived) or more than once.
  */
 export function useVoxRunner() {
   const [status, setStatus] = useState<RunnerStatus>("idle");
@@ -24,86 +29,39 @@ export function useVoxRunner() {
 
   const workerRef = useRef<Worker | null>(null);
   const nextId = useRef(0);
-  const truncated = useRef(false);
+  // The unfinished last line of program output, and whether it is on screen.
+  const partial = useRef<{ text: string; shown: boolean }>({ text: "", shown: false });
 
-  const append = useCallback((kind: LineKind, texts: string[]) => {
-    if (texts.length === 0) return;
-    setLines((prev) => {
-      const room = MAX_LINES - prev.length;
-      if (room <= 0) {
-        if (truncated.current) return prev;
-        truncated.current = true;
-        return [
-          ...prev,
-          {
-            id: nextId.current++,
-            kind: "info",
-            text: `… output truncated after ${MAX_LINES} lines`,
-          },
-        ];
-      }
-      const slice = texts.slice(0, room);
-      const added = slice.map((text) => ({ id: nextId.current++, kind, text }));
-      return [...prev, ...added];
-    });
-  }, []);
+  const line = useCallback(
+    (kind: LineKind, text: string): ConsoleLine => ({ id: nextId.current++, kind, text }),
+    [],
+  );
 
-  // print emits raw chunks; a console line only ends at '\n'. The trailing
-  // partial line is shown live and replaced as more chunks arrive.
-  const partialText = useRef("");
-  const partialId = useRef<number | null>(null);
+  const append = useCallback(
+    (kind: LineKind, texts: string[]) => {
+      if (texts.length === 0) return;
+      const added = texts.map((text) => line(kind, text));
+      setLines((prev) => withLines(prev, added));
+    },
+    [line],
+  );
 
-  const appendOutput = useCallback((chunks: string[]) => {
-    const text = partialText.current + chunks.join("");
-    const parts = text.split("\n");
-    partialText.current = parts.pop()!;
-    const completed = parts;
-    setLines((prev) => {
-      const next =
-        partialId.current !== null ? prev.slice(0, -1) : prev.slice();
-      const room = MAX_LINES - next.length;
-      if (room <= 0) {
-        partialId.current = null;
-        if (truncated.current) return prev;
-        truncated.current = true;
-        next.push({
-          id: nextId.current++,
-          kind: "info",
-          text: `… output truncated after ${MAX_LINES} lines`,
-        });
-        return next;
-      }
-      for (const t of completed.slice(0, room)) {
-        next.push({ id: nextId.current++, kind: "out", text: t });
-      }
-      if (completed.length > room) {
-        truncated.current = true;
-        partialId.current = null;
-        next.push({
-          id: nextId.current++,
-          kind: "info",
-          text: `… output truncated after ${MAX_LINES} lines`,
-        });
-        return next;
-      }
-      if (partialText.current !== "") {
-        partialId.current = nextId.current;
-        next.push({
-          id: nextId.current++,
-          kind: "out",
-          text: partialText.current,
-        });
-      } else {
-        partialId.current = null;
-      }
-      return next;
-    });
-  }, []);
+  /** Raw print output: finished lines are appended, the partial line is shown live. */
+  const appendOutput = useCallback(
+    (chunks: string[]) => {
+      const split = splitOutput(partial.current.text, chunks);
+      const replacing = partial.current.shown;
+      const added = split.completed.map((text) => line("out", text));
+      if (split.partial !== "") added.push(line("out", split.partial));
+      partial.current = { text: split.partial, shown: split.partial !== "" };
+      setLines((prev) => withLines(replacing ? withoutPartial(prev) : prev, added));
+    },
+    [line],
+  );
 
   /** The partial line becomes permanent: before input echoes or at exit. */
   const finalizePartial = useCallback(() => {
-    partialId.current = null;
-    partialText.current = "";
+    partial.current = { text: "", shown: false };
   }, []);
 
   const killWorker = useCallback(() => {
@@ -114,9 +72,7 @@ export function useVoxRunner() {
   const run = useCallback(
     (source: string) => {
       killWorker();
-      truncated.current = false;
-      partialText.current = "";
-      partialId.current = null;
+      partial.current = { text: "", shown: false };
       setLines([]);
       setIr(null);
       setStatus("running");
@@ -196,9 +152,9 @@ export function useVoxRunner() {
   }, [append, finalizePartial, killWorker]);
 
   const clear = useCallback(() => {
-    truncated.current = false;
-    // Keep partialText: a still-running program continues its current line.
-    partialId.current = null;
+    // Keep the partial text: a still-running program continues its line.
+    // It is no longer on screen, so the next chunk starts a fresh line.
+    partial.current = { text: partial.current.text, shown: false };
     setLines([]);
   }, []);
 
